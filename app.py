@@ -280,9 +280,9 @@ def load_recipe_into_state(recipe):
         st.session_state[f"_d_grams_{e}_{i}"] = 0.0
         st.session_state[f"_d_price_{e}_{i}"] = 0.0
     for i, line in enumerate(lines):
-        st.session_state[f"_d_ing_{e}_{i}"]   = line['ingredient_name']
-        st.session_state[f"_d_grams_{e}_{i}"] = float(line['grams'])
-        st.session_state[f"_d_price_{e}_{i}"] = float(line.get('price_per_kg', 0))
+        st.session_state[f"_d_ing_{e}_{i}"]   = line.get('ingredient_name') or "— seleccionar —"
+        st.session_state[f"_d_grams_{e}_{i}"] = float(line.get('grams') or 0)
+        st.session_state[f"_d_price_{e}_{i}"] = float(line.get('price_per_kg') or 0)
 
     st.session_state.active_recipe_id = recipe['id']
     st.session_state.recipe_name      = recipe['name']
