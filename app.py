@@ -645,8 +645,11 @@ elif page == "📚 Recetas":
                         rows_txt = "| Ingrediente | Gramos | $/kg |\n|---|---|---|\n"
                         total_g = 0
                         for ln in full['lines']:
-                            rows_txt += f"| {ln['ingredient_name']} | {ln['grams']:.1f}g | {ln.get('price_per_kg',0):.2f} |\n"
-                            total_g += ln['grams']
+                            g = float(ln['grams'] or 0)
+                            p = float(ln.get('price_per_kg') or 0)
+                            name = ln['ingredient_name'] or '—'
+                            rows_txt += f"| {name} | {g:.1f}g | {p:.2f} |\n"
+                            total_g += g
                         rows_txt += f"| **TOTAL** | **{total_g:.1f}g** | |\n"
                         st.markdown(rows_txt)
                     if full.get('notes'):
