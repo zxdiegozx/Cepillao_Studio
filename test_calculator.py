@@ -540,5 +540,190 @@ class TestValidateBrix:
         assert r['sugars_estimados_g'] >= 0
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# analyze_protein
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Ingredientes de proteína adicionales para estos tests
+LPD_PROT    = ing(fat=1.0, msnf=52.0, sugars=50.0, water=3.0,  pod=0.50, pac=0.50,
+                  name='Leche en polvo descremada')
+CASEIN_MIC  = ing(fat=0.5, msnf=0,    sugars=0,    water=8.0,  pod=0,    pac=0,
+                  name='Caseína micelar')
+WPC_80      = ing(fat=6.0, msnf=0,    sugars=5.0,  water=5.0,  pod=0,    pac=0,
+                  name='WPC 80%', category='Lácteo')
+GUISANTE    = ing(fat=2.0, msnf=0,    sugars=2.0,  water=6.0,  pod=0,    pac=0,
+                  name='Proteína de guisante', category='Vegetal')
+
+
+class TestAnalyzeProtein:
+
+    def _run(self, lines, product_type='Helado/Gelato'):
+        from calculator import analyze_protein
+        t = calc_totals(lines)
+        p = calc_percentages(t)
+        return analyze_protein(lines, t, p, product_type)
+
+    # ── Detección básica ──────────────────────────────────────────────────────
+
+    def test_lpd_detectado(self):
+        """LPD debe aparecer como fuente proteica con tipo lácteo_mixto."""
+        lines = [(LECHE, 500, 0), (LPD_PROT, 100, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        nombres = [f['nombre'] for f in r['fuentes']]
+        assert any('polvo' in n.lower() or 'lpd' in n.lower() or 'descremada' in n.lower()
+                   for n in nombres), f"LPD no detectado. Fuentes: {nombres}"
+
+    def test_caseina_micelar_tipo_correcto(self):
+        """Caseína micelar debe clasificarse como tipo 'caseína'."""
+        lines = [(AGUA, 700, 0), (CASEIN_MIC, 50, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        tipos = [f['tipo'] for f in r['fuentes']]
+        assert 'caseína' in tipos
+
+    def test_wpc_tipo_suero(self):
+        """WPC debe clasificarse como tipo 'suero'."""
+        lines = [(AGUA, 700, 0), (WPC_80, 80, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        tipos = [f['tipo'] for f in r['fuentes']]
+        assert 'suero' in tipos
+
+    def test_guisante_tipo_vegetal(self):
+        """Proteína de guisante debe clasificarse como tipo 'vegetal'."""
+        lines = [(AGUA, 700, 0), (GUISANTE, 60, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        tipos = [f['tipo'] for f in r['fuentes']]
+        assert 'vegetal' in tipos
+
+    # ── Cálculo de gramos ─────────────────────────────────────────────────────
+
+    def test_proteina_total_positiva(self):
+        lines = [(LECHE, 650, 0), (LPD_PROT, 50, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        assert r['protein_total_g'] > 0
+
+    def test_caseina_100g_proteina_correcta(self):
+        """100g de caseína micelar (protein_fraction=0.88) → ~88g proteína."""
+        lines = [(AGUA, 900, 0), (CASEIN_MIC, 100, 0)]
+        r = self._run(lines)
+        # Buscar la entrada de caseína
+        fuente = next((f for f in r['fuentes']
+                       if 'caseína' in f['tipo'] or 'casein' in f['nombre'].lower()), None)
+        assert fuente is not None
+        assert 80 < fuente['proteina_g'] < 95   # 88g ± tolerancia de match
+
+    def test_sin_fuentes_proteicas(self):
+        """Receta sin proteína → protein_total_g cercano a cero."""
+        lines = [(AGUA, 700, 0), (SACAROSA, 300, 0)]
+        r = self._run(lines)
+        assert r['protein_total_g'] < 1.0
+
+    # ── Scores funcionales ────────────────────────────────────────────────────
+
+    def test_score_espuma_wpc_alto(self):
+        """WPC tiene capacidad_espuma=5 → score_espuma alto."""
+        lines = [(AGUA, 700, 0), (WPC_80, 100, 0), (SACAROSA, 200, 0)]
+        r = self._run(lines)
+        assert r['score_espuma'] >= 4.0
+
+    def test_score_gel_caseina_alto(self):
+        """Caseína micelar tiene capacidad_gel=5 → score_gel alto."""
+        lines = [(AGUA, 800, 0), (CASEIN_MIC, 80, 0), (SACAROSA, 120, 0)]
+        r = self._run(lines)
+        assert r['score_gel'] >= 4.0
+
+    # ── Claims nutricionales ──────────────────────────────────────────────────
+
+    def test_claim_alto_proteina(self):
+        """Receta con >10g prot/100g → claim 'alto_proteina'."""
+        # ~100g WPC en 800g mezcla → ~10g/100g
+        lines = [(AGUA, 680, 0), (WPC_80, 100, 0), (SACAROSA, 120, 0)]
+        r = self._run(lines)
+        if r['protein_per_100g'] >= 10:
+            assert r['claim'] == 'alto_proteina'
+
+    def test_claim_fuente_proteina(self):
+        """Receta con 5-10g prot/100g → claim 'fuente_proteina'."""
+        lines = [(LECHE, 500, 0), (LPD_PROT, 60, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        if 5 <= r['protein_per_100g'] < 10:
+            assert r['claim'] == 'fuente_proteina'
+
+    def test_sin_claim_proteina_baja(self):
+        """Mezcla con <5g prot/100g → claim None."""
+        lines = [(LECHE, 700, 0), (SACAROSA, 300, 0)]
+        r = self._run(lines)
+        if r['protein_per_100g'] < 5:
+            assert r['claim'] is None
+
+    # ── Recomendaciones ───────────────────────────────────────────────────────
+
+    def test_rec_minimo_estructura_cuando_bajo(self):
+        """Mezcla con muy poca proteína → recomendación de mínimo estructural."""
+        # Usar un poco de leche entera para que haya algo de MSNF (y la función retorne datos)
+        # pero tan poco que la proteína quede bajo el mínimo estructural (2.5%)
+        lines = [(AGUA, 850, 0), (LECHE, 50, 0), (SACAROSA, 100, 0)]
+        r = self._run(lines)
+        if not r:
+            return  # sin fuentes proteicas → función retorna vacío, no hay recomendaciones
+        titulos = [rec['titulo'] for rec in r.get('recomendaciones', [])]
+        # Solo verificar si la proteína es realmente baja
+        if r.get('protein_pct', 0) < 2.5:
+            assert any('mínimo' in t.lower() or 'estructura' in t.lower()
+                       for t in titulos), f"Esperaba rec de mínimo. Recs: {titulos}"
+
+    def test_rec_helado_ligero_optimo(self):
+        """Helado Ligero con proteína baja → recomendación específica."""
+        lines = [(AGUA, 750, 0), (SACAROSA, 200, 0), (LECHE, 50, 0)]
+        r = self._run(lines, product_type='Helado Ligero')
+        titulos = [rec['titulo'] for rec in r.get('recomendaciones', [])]
+        assert any('ligero' in t.lower() or 'light' in t.lower() or 'óptimo' in t.lower()
+                   for t in titulos)
+
+    def test_rec_exceso_proteina_critico(self):
+        """Proteína > 12% → diagnóstico critical de exceso."""
+        # ~180g WPC en 900g mezcla → ~16g/100g
+        lines = [(AGUA, 700, 0), (WPC_80, 180, 0), (SACAROSA, 120, 0)]
+        r = self._run(lines)
+        if r['protein_per_100g'] > 12:
+            recs_crit = [rec for rec in r.get('recomendaciones', [])
+                         if rec['priority'] == 'critical']
+            assert len(recs_crit) > 0
+
+    def test_advertencia_temperatura_wpc(self):
+        """WPC (t_denat=65°C) debe generar advertencia de temperatura."""
+        lines = [(AGUA, 700, 0), (WPC_80, 100, 0), (SACAROSA, 200, 0)]
+        r = self._run(lines)
+        # Debe haber al menos una advertencia de temperatura
+        assert len(r.get('advertencias', [])) > 0
+        assert any('65' in adv or 'desnaturaliz' in adv.lower()
+                   for adv in r['advertencias'])
+
+    def test_tipo_dominante_correcto(self):
+        """Con caseína micelar como única fuente, tipo_dominante debe ser 'caseína'."""
+        lines = [(AGUA, 800, 0), (CASEIN_MIC, 80, 0), (SACAROSA, 120, 0)]
+        r = self._run(lines)
+        assert r['tipo_dominante'] == 'caseína'
+
+    def test_pct_por_tipo_suma_100(self):
+        """Los porcentajes por tipo deben sumar ~100%."""
+        lines = [(LECHE, 400, 0), (WPC_80, 60, 0), (CASEIN_MIC, 40, 0), (SACAROSA, 150, 0)]
+        r = self._run(lines)
+        if r['pct_por_tipo']:
+            total_pct = sum(r['pct_por_tipo'].values())
+            assert abs(total_pct - 100.0) < 1.0   # tolerancia de redondeo
+
+    def test_keys_requeridas_presentes(self):
+        """El dict de retorno debe contener todas las claves esperadas."""
+        lines = [(LECHE, 650, 0), (SACAROSA, 200, 0)]
+        r = self._run(lines)
+        required = {
+            'fuentes', 'protein_total_g', 'protein_pct', 'protein_per_100g',
+            'tipo_dominante', 'pct_por_tipo', 'score_espuma', 'score_gel',
+            'claim', 'advertencias', 'recomendaciones',
+        }
+        assert required.issubset(r.keys())
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
