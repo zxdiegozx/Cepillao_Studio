@@ -980,6 +980,243 @@ def analyze_sweeteners(lines_with_ings):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ANÁLISIS DE PROTEÍNAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def analyze_protein(lines_with_ings, totals, pct, product_type='Helado/Gelato'):
+    """
+    Analiza el contenido proteico de la receta por fuente y emite recomendaciones.
+
+    Estrategia de estimación
+    ------------------------
+    Cada ingrediente puede tener proteína en dos formas en la BD:
+      a) protein_in_total=True  → proteína_g = grams × protein_fraction
+      b) protein_in_total=False → proteína_g = msnf_g × protein_fraction
+         (para leches líquidas donde el MSNF ya está calculado por calc_line)
+
+    Para ingredientes sin perfil en PROTEIN_PROFILES se aplica el fallback
+    del motor de calorías existente: proteína ≈ MSNF × 0.36 (fracción media
+    de proteína en el MSNF de leche, Goff & Hartel 2013).
+
+    Retorna
+    -------
+    dict con:
+      fuentes          — lista de dicts por ingrediente con proteína detectada
+      protein_total_g  — gramos totales de proteína en la mezcla
+      protein_pct      — % proteína sobre masa total
+      protein_per_100g — g de proteína por 100g de mezcla
+      tipo_dominante   — tipo de proteína mayoritario ('caseína'|'suero'|'vegetal'|'huevo'|'lácteo_mixto')
+      score_espuma     — 1-5 ponderado por gramos (proxy de capacidad de overrun)
+      score_gel        — 1-5 ponderado por gramos (proxy de cuerpo en congelación)
+      claim            — None | 'fuente_proteina' | 'alto_proteina'
+      advertencias     — lista de strings con alertas de proceso
+      recomendaciones  — lista de dicts con ajustes sugeridos
+    """
+    from constants import (
+        PROTEIN_PROFILES, PROTEIN_CLAIM_THRESHOLDS,
+        PROTEIN_FUNCTIONAL_TARGETS,
+        PRODUCT_LIGERO, PRODUCT_VEGANO, PRODUCT_SORBETE, PRODUCT_GRANITA,
+    )
+
+    m = totals.get('grams', 0)
+    if m <= 0:
+        return {}
+
+    is_light   = product_type == PRODUCT_LIGERO
+    is_vegan   = product_type == PRODUCT_VEGANO
+    is_sorbet  = product_type in (PRODUCT_SORBETE, PRODUCT_GRANITA)
+
+    fuentes        = []
+    protein_total  = 0.0
+    espuma_sum     = 0.0
+    gel_sum        = 0.0
+    peso_sum       = 0.0
+    tipo_pesos     = {}   # {tipo: gramos_proteina}
+    advertencias   = []
+
+    for ing, grams, _ in lines_with_ings:
+        if not ing or not grams:
+            continue
+        g        = float(grams)
+        name_low = ing.get('name', '').lower()
+
+        # Buscar perfil por substring (más largo primero para evitar match parcial)
+        perfil = None
+        matched_key = ''
+        for key in sorted(PROTEIN_PROFILES.keys(), key=len, reverse=True):
+            if key in name_low:
+                perfil = PROTEIN_PROFILES[key]
+                matched_key = key
+                break
+
+        if perfil:
+            if perfil['protein_in_total']:
+                prot_g = g * perfil['protein_fraction']
+            else:
+                # fracción sobre MSNF del ingrediente
+                msnf_g = g * float(ing.get('msnf', 0)) / 100
+                prot_g = msnf_g * perfil['protein_fraction']
+        else:
+            # Fallback: proteína ≈ MSNF × 0.36 (misma constante que calc_calories)
+            msnf_g = g * float(ing.get('msnf', 0)) / 100
+            prot_g = msnf_g * 0.36
+            if msnf_g > 0:
+                perfil = {
+                    'tipo': 'lácteo_mixto',
+                    'solubilidad': 'micelar',
+                    't_desnaturaliz_c': 72,
+                    'capacidad_espuma': 2,
+                    'capacidad_gel': 2,
+                    'nota': 'Estimado como lácteo mixto (fallback 36% del MSNF).',
+                }
+
+        if prot_g < 0.05:
+            continue   # contribución despreciable (<0.05g)
+
+        protein_total += prot_g
+        tipo = perfil['tipo'] if perfil else 'lácteo_mixto'
+        tipo_pesos[tipo] = tipo_pesos.get(tipo, 0) + prot_g
+
+        # Ponderación de scores por gramos de proteína
+        esp = perfil['capacidad_espuma'] if perfil else 2
+        gel = perfil['capacidad_gel']    if perfil else 2
+        espuma_sum += esp * prot_g
+        gel_sum    += gel * prot_g
+        peso_sum   += prot_g
+
+        # Advertencia de temperatura de desnaturalización
+        t_denat = perfil.get('t_desnaturaliz_c', 999) if perfil else 999
+        if t_denat < 75:
+            advertencias.append(
+                f"⚠️ {ing['name']}: desnaturaliza a {t_denat}°C — "
+                "no pasteurizar sobre esa temperatura o perderás funcionalidad espumante."
+            )
+
+        fuentes.append({
+            'nombre':        ing['name'],
+            'gramos':        g,
+            'proteina_g':    round(prot_g, 2),
+            'tipo':          tipo,
+            'solubilidad':   perfil.get('solubilidad', '—') if perfil else '—',
+            'espuma':        esp,
+            'gel':           gel,
+            't_denat':       t_denat if t_denat < 999 else None,
+            'nota':          perfil.get('nota', '') if perfil else '',
+            'perfil_clave':  matched_key or '(fallback)',
+        })
+
+    protein_pct     = protein_total / m * 100
+    protein_per_100 = protein_pct   # idéntico — claridad en API
+
+    score_espuma = espuma_sum / peso_sum if peso_sum > 0 else 0
+    score_gel    = gel_sum    / peso_sum if peso_sum > 0 else 0
+
+    tipo_dominante = max(tipo_pesos, key=tipo_pesos.get) if tipo_pesos else 'n/d'
+
+    # Pct por tipo
+    pct_por_tipo = {
+        t: round(v / protein_total * 100, 1)
+        for t, v in tipo_pesos.items()
+    } if protein_total > 0 else {}
+
+    # Claim nutricional
+    thr = PROTEIN_CLAIM_THRESHOLDS
+    if protein_per_100 >= thr['alto_proteina']:
+        claim = 'alto_proteina'
+    elif protein_per_100 >= thr['fuente_proteina']:
+        claim = 'fuente_proteina'
+    else:
+        claim = None
+
+    # ── Recomendaciones ───────────────────────────────────────────────────────
+    tgt = PROTEIN_FUNCTIONAL_TARGETS
+    recomendaciones = []
+
+    def rec(priority, titulo, texto):
+        recomendaciones.append({'priority': priority, 'titulo': titulo, 'texto': texto})
+
+    # 1. Mínimo estructural para overrun
+    if 0 < protein_pct < tgt['minimo_estructura'] and not is_sorbet:
+        deficit = tgt['minimo_estructura'] - protein_pct
+        rec('important',
+            f"Proteína {protein_pct:.1f}% — por debajo del mínimo estructural ({tgt['minimo_estructura']}%)",
+            f"Con menos de {tgt['minimo_estructura']}% de proteína el helado tiene poco cuerpo "
+            f"y el overrun cae por debajo del 30%. "
+            f"Necesitas ~{deficit * m / 100:.0f} g más de proteína. "
+            "Opciones: ① LPD (+52g MSNF por 100g) ② WPC 80% ③ Caseína micelar.")
+
+    # 2. Óptimo para helado light
+    if is_light and protein_pct < tgt['optimo_light']:
+        rec('important',
+            f"Helado Ligero: proteína {protein_pct:.1f}% — debajo del óptimo ({tgt['optimo_light']}%)",
+            f"En helados light la proteína reemplaza parte de la función de la grasa. "
+            f"Objetivo: {tgt['optimo_light']}% proteína. "
+            "Caseína micelar (0.88 prot/g) es la mejor opción: "
+            "aporta cuerpo sin lactosa extra ni riesgo de arenado.")
+
+    # 3. Exceso — riesgo de textura calcárea
+    if protein_pct > tgt['maximo_recomendado']:
+        rec('critical',
+            f"Proteína {protein_pct:.1f}% — exceso (máx recomendado {tgt['maximo_recomendado']}%)",
+            "Por encima del 12% la proteína no hidratada forma agregados en congelación → "
+            "textura calcárea, grumosa o harinosa. "
+            "Reduce WPC/WPI y sustituye por caseína micelar (gelifica mejor a bajas dosis) "
+            "o por MSNF de leche líquida.")
+
+    # 4. Mezcla vegana sin proteína
+    if is_vegan and protein_total < 1.0:
+        rec('important',
+            "Gelato Vegano sin fuente proteica",
+            "Sin proteína la emulsión vegetal es inestable → separación de fases en congelación. "
+            "Añade: ① Proteína de guisante 20-30g/kg "
+            "② Proteína de soja 15-25g/kg "
+            "③ WPI (si no requiere ser 100% vegetal) 20-30g/kg.")
+
+    # 5. Temperatura de pasteurización cruzada
+    tiene_suero  = 'suero' in tipo_pesos
+    tiene_caseina = 'caseína' in tipo_pesos or 'lácteo_mixto' in tipo_pesos
+    if tiene_suero and tiene_caseina:
+        rec('adjustable',
+            "Mezcla caseína + suero: temperatura de pasteurización crítica",
+            "Con WPC/WPI en la misma receta que caseína, pasteurizar a 72-75°C/15s. "
+            "No superar 80°C o el suero desnaturaliza y pierde capacidad espumante. "
+            "Si usas WPI solo, baja la temperatura a 68-70°C.")
+
+    # 6. Score de espuma bajo para tipo de producto
+    if score_espuma < 2.5 and not is_sorbet and not is_vegan:
+        rec('adjustable',
+            f"Score espuma {score_espuma:.1f}/5 — overrun puede ser limitado",
+            "Las proteínas actuales tienen baja capacidad espumante. "
+            "Para mejorar overrun: ① añade WPC (espuma=5) 20-30g/kg "
+            "② clara de huevo pasteurizada 30-50g/kg "
+            "③ suero de leche líquido 50-100g/kg.")
+
+    # 7. Proteína vegetal dominante — alerta de sabor
+    if tipo_dominante == 'vegetal' and protein_pct > 3:
+        rec('adjustable',
+            "Proteína vegetal dominante — gestión de sabor",
+            "Proteínas vegetales (guisante, arroz) tienen notas terrosas/amargas perceptibles "
+            "sobre 3% de la mezcla. "
+            "Estrategias: ① combinar con 0.3-0.5% extracto de vainilla "
+            "② usar cacao alcalino ≥15g/kg (enmascara completamente) "
+            "③ mezclar guisante+arroz 50/50 (perfil de aminoácidos más completo y sabor más neutro).")
+
+    return {
+        'fuentes':         fuentes,
+        'protein_total_g': round(protein_total, 2),
+        'protein_pct':     round(protein_pct, 2),
+        'protein_per_100g': round(protein_per_100, 2),
+        'tipo_dominante':  tipo_dominante,
+        'pct_por_tipo':    pct_por_tipo,
+        'score_espuma':    round(score_espuma, 1),
+        'score_gel':       round(score_gel, 1),
+        'claim':           claim,
+        'advertencias':    advertencias,
+        'recomendaciones': recomendaciones,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TICKET DE PRODUCCIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -993,10 +1230,12 @@ def format_production_ticket(
     pct: dict,
     derived: dict,
     kcal: dict,
+    protein_data: dict = None,
     diags_excluir: set = None,
 ) -> str:
     """
     Genera el texto del ticket de producción.
+    protein_data : salida de analyze_protein() — opcional.
     """
     if diags_excluir is None:
         diags_excluir = DIAGS_EXCLUIR_TICKET
@@ -1078,7 +1317,12 @@ def format_production_ticket(
         f"  ΔT crioscopía:  {derived.get('delta_t', 0):.2f} °C\n"
         f"  kcal / 100 g:   {kcal['kcal_per_100g']:.0f} kcal\n"
         f"  Costo estimado: ${totals['cost']:.2f}\n"
-        f"{alcohol_block}"
+        + (f"  Proteína:       {protein_data['protein_per_100g']:.1f} g/100g"
+           + (f"  [{protein_data['claim'].replace('_',' ').upper()}]"
+              if protein_data.get('claim') else "")
+           + f"  ({protein_data['tipo_dominante']})\n"
+           if protein_data else "")
+        + f"{alcohol_block}"
         f"{diag_block}\n"
         f"{instrucciones}\n"
         "══════════════════════════════════════════════"
