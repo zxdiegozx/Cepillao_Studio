@@ -2,8 +2,10 @@ import streamlit as st
 import calculator as calc
 from constants import (
     PRODUCT_TYPES, MACHINES,
-    MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD,
+    MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD, MACHINE_MANTECADORA,
     DIAGS_EXCLUIR_TICKET,
+    INGREDIENT_CATEGORIES,
+    CREAMI_OVERRUN_PCT,
 )
 
 # ── set_page_config DEBE ser el primer comando Streamlit ──────────────────────
@@ -20,27 +22,26 @@ try:
 except Exception as e:
     st.error(f"Error de base de datos: {e}")
 
-# MEJORA: cache con clave de versión para invalidación explícita.
-# Al guardar o eliminar un ingrediente se incrementa _ing_cache_version,
-# lo que genera un cache miss inmediato sin esperar el TTL de 300 s.
 if "ing_cache_version" not in st.session_state:
     st.session_state.ing_cache_version = 0
 
 @st.cache_data(ttl=300)
 def _load_ingredients(version: int):
-    """version es solo una clave de cache — cambiarla invalida el resultado."""
     try:
         return db.get_all_ingredients()
     except Exception:
         return []
 
 def _invalidate_ingredient_cache():
-    """Llama esto tras cualquier write a la BD de ingredientes."""
     st.session_state.ing_cache_version += 1
 
 ingredients_raw  = _load_ingredients(st.session_state.ing_cache_version)
 ingredients_map  = {ing['name']: ing for ing in ingredients_raw}
 ingredient_names = list(ingredients_map.keys())
+
+# ── Configuración de parámetros (menú de configuración) ──────────────────────
+if "config_params" not in st.session_state:
+    st.session_state.config_params = {}   # override de targets
 
 st.markdown("""
 <style>
@@ -52,10 +53,11 @@ div[data-testid="stMetricValue"] { font-size: 20px; font-weight: bold; }
 st.title("🍦 Cepillao' Gelato Studio")
 st.caption("Ninja Creami Edition · Formulador artesanal de helados")
 
-tab_form, tab_recetas, tab_ingredientes = st.tabs([
+tab_form, tab_recetas, tab_ingredientes, tab_config = st.tabs([
     "🧪 Formulador",
     "📁 Mis Recetas",
-    "🗄️ Ingredientes"
+    "🗄️ Ingredientes",
+    "⚙️ Configuración",
 ])
 
 
@@ -79,7 +81,7 @@ with tab_form:
         st.session_state.num_rows = 4
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
-    st.sidebar.header("⚙️ Parámetros")
+    st.sidebar.header("⚙️ Parámetros de receta")
 
     recipe_name_input = st.sidebar.text_input(
         "Nombre de la receta",
@@ -89,12 +91,26 @@ with tab_form:
 
     product_type = st.sidebar.selectbox("Tipo de Producto", PRODUCT_TYPES)
     machine      = st.sidebar.selectbox("Maquinaria", MACHINES, index=0)
-    overrun_pct   = st.sidebar.number_input(
-        "Overrun (%)", 0, 120,
-        45 if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD) else 30,
-        step=5
+
+    is_creami = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
+
+    # ── Parámetros de producción — solo Mantecadora ───────────────────────────
+    if is_creami:
+        overrun_fijo = CREAMI_OVERRUN_PCT.get(machine, 50)
+        st.sidebar.info(
+            f"**Overrun {machine}:** ~{overrun_fijo}%  \n"
+            "_Fijo por diseño mecánico. No configurable._"
+        )
+        overrun_pct   = overrun_fijo   # interno — no editable
+        target_liters = 1.0            # no relevante para Creami
+    else:
+        overrun_pct   = st.sidebar.number_input("Overrun (%)", 0, 120, 30, step=5)
+        target_liters = st.sidebar.number_input("Litros objetivo", 0.1, 50.0, 1.0, step=0.5)
+
+    brix_medido = st.sidebar.number_input(
+        "Brix medido (refractómetro)", 0.0, 80.0, 0.0, step=0.5,
+        help="Opcional — para validar tu receta contra el refractómetro"
     )
-    target_liters = st.sidebar.number_input("Litros objetivo", 0.1, 50.0, 1.0, step=0.5)
 
     st.sidebar.divider()
 
@@ -103,258 +119,107 @@ with tab_form:
         if not nombre:
             st.sidebar.error("Escribe un nombre para la receta.")
             return
-        lines = []
+        lines_to_save = []
         for i in range(st.session_state.num_rows):
-            nom = st.session_state.get(f"ing_name_{i}", "")
-            gr  = st.session_state.get(f"grams_{i}",   0.0)
-            pr  = st.session_state.get(f"price_{i}",   0.0)
-            if nom and nom != "-- Seleccionar ingrediente --" and gr > 0:
-                lines.append({"ingredient_name": nom, "grams": gr, "price_per_kg": pr})
-        if not lines:
-            st.sidebar.error("Añade al menos un ingrediente con gramos.")
+            n = st.session_state.get(f"ing_name_{i}", "")
+            g = st.session_state.get(f"grams_{i}", 0.0)
+            p = st.session_state.get(f"price_{i}", 0.0)
+            if n and g:
+                lines_to_save.append({"ingredient_name": n, "grams": g, "price_per_kg": p})
+        if not lines_to_save:
+            st.sidebar.error("Añade al menos un ingrediente.")
             return
-        data = {
-            "name":          nombre,
-            "product_type":  product_type,
-            "machine":       machine,
-            "base_grams":    sum(l["grams"] for l in lines),
-            "notes":         "",
-            "tasting_notes": "",
-            "lines":         lines,
+        recipe_data = {
+            "name":         nombre,
+            "product_type": product_type,
+            "machine":      machine,
+            "base_grams":   sum(l["grams"] for l in lines_to_save),
+            "notes":        "",
+            "lines":        lines_to_save,
         }
-        if st.session_state.get("recipe_loaded_id"):
-            data["id"] = st.session_state["recipe_loaded_id"]
-        rec_id = db.save_recipe(data)
-        st.session_state["recipe_loaded_id"]   = rec_id
-        st.session_state["recipe_loaded_name"] = nombre
-        st.sidebar.success(f"✅ Receta «{nombre}» guardada.")
+        existing_id = st.session_state.get("recipe_loaded_id")
+        if existing_id:
+            db.update_recipe(existing_id, recipe_data)
+            st.sidebar.success(f"✅ «{nombre}» actualizada.")
+        else:
+            db.save_recipe(recipe_data)
+            st.sidebar.success(f"✅ «{nombre}» guardada.")
 
-    st.sidebar.button("💾 Guardar receta", use_container_width=True,
-                      on_click=guardar_receta)
+    st.sidebar.button("💾 Guardar receta", on_click=guardar_receta, use_container_width=True)
+    st.sidebar.button("🗑️ Limpiar todo",   on_click=callback_clear_all, use_container_width=True)
 
-    # ── Validación Brix (sidebar opcional) ───────────────────────────────────
-    st.sidebar.divider()
-    with st.sidebar.expander("🔭 Validar Brix (refractómetro)"):
-        brix_medido = st.number_input(
-            "°Brix medido", min_value=0.0, max_value=80.0, value=0.0,
-            step=0.5, key="brix_medido_input",
-            help="Lectura directa del refractómetro sobre la mezcla homogénea"
-        )
+    # ── Layout principal ──────────────────────────────────────────────────────
+    col_ing, col_panel = st.columns([1, 1], gap="large")
 
-    # ── Layout formulador ──────────────────────────────────────────────────────
-    col_tabla, col_panel = st.columns([5, 3], gap="large")
+    with col_ing:
+        st.subheader("🧾 Ingredientes")
 
-    with col_tabla:
-        if st.session_state.get("recipe_loaded_name"):
-            st.info(f"✏️ Editando: **{st.session_state['recipe_loaded_name']}**")
-
-        st.subheader("📝 Tabla de Formulación")
-
-        lines_for_calculator    = []
+        lines_for_calculator = []
         active_ingredient_names = []
 
-        h1, h2, h3 = st.columns([3, 1, 1])
-        h1.markdown("**Ingrediente**")
-        h2.markdown("**Gramos (g)**")
-        h3.markdown("**Precio/kg ($)**")
-
         for i in range(st.session_state.num_rows):
-            c1, c2, c3 = st.columns([3, 1, 1])
-
-            chosen_name = c1.selectbox(
-                f"Ingrediente {i}",
-                options=["-- Seleccionar ingrediente --"] + ingredient_names,
-                key=f"ing_name_{i}",
-                label_visibility="collapsed"
+            c1, c2, c3 = st.columns([3, 2, 2])
+            ing_name = c1.selectbox(
+                f"Ingrediente {i+1}", [""] + ingredient_names,
+                key=f"ing_name_{i}", label_visibility="collapsed"
             )
-
             grams = c2.number_input(
-                f"Gramos {i}", min_value=0.0, value=0.0, step=5.0,
+                "g", 0.0, 5000.0, 0.0, step=5.0,
                 key=f"grams_{i}", label_visibility="collapsed"
             )
-
-            # MEJORA: precio se actualiza cuando cambia el ingrediente seleccionado.
-            # Usamos una clave de "precio sugerido" separada del widget para
-            # poder forzar el valor sin violar la restricción de Streamlit sobre
-            # modificar widgets ya renderizados.
-            price_key = f"price_{i}"
-            ing_data  = ingredients_map.get(chosen_name, {})
-            suggested = float(ing_data.get("price_per_kg", 0) or 0)
-
-            # Si el ingrediente acaba de cambiar respecto al render anterior,
-            # sincronizamos el precio sugerido en session_state antes de
-            # que el widget lo lea.
-            prev_name_key = f"_prev_ing_name_{i}"
-            prev_name     = st.session_state.get(prev_name_key)
-            if prev_name != chosen_name:
-                # Solo sobreescribimos si el ingrediente cambió
-                st.session_state[price_key] = suggested
-                st.session_state[prev_name_key] = chosen_name
-
             price = c3.number_input(
-                f"Precio {i}", min_value=0.0, step=0.5,
-                key=price_key, label_visibility="collapsed"
+                "$/kg", 0.0, step=0.5,
+                key=f"price_{i}", label_visibility="collapsed"
             )
+            if ing_name and grams > 0:
+                ing_obj = ingredients_map.get(ing_name)
+                if ing_obj:
+                    lines_for_calculator.append((ing_obj, grams, price))
+                    active_ingredient_names.append(ing_name)
 
-            if chosen_name != "-- Seleccionar ingrediente --" and grams > 0:
-                lines_for_calculator.append((ingredients_map[chosen_name], grams, price))
-                active_ingredient_names.append(chosen_name)
+        st.button("➕ Agregar fila", on_click=callback_add_row, use_container_width=True)
 
-        st.write("")
-        b1, b2, _ = st.columns([1.5, 1.5, 4])
-        b1.button("➕ Añadir fila",  use_container_width=True, on_click=callback_add_row)
-        b2.button("🗑️ Limpiar todo", use_container_width=True, on_click=callback_clear_all)
-
-        if active_ingredient_names:
-            st.caption(f"🧮 {len(active_ingredient_names)} ingredientes activos")
-
-        # ── Panel de Edulcorantes ─────────────────────────────────────────────
-        if lines_for_calculator:
-            st.divider()
-            st.subheader("🍬 Edulcorantes")
-            sweet_data = calc.analyze_sweeteners(lines_for_calculator)
-            if sweet_data:
-                for s in sweet_data:
-                    with st.expander(f"**{s['nombre']}** — {s['gramos']:.1f} g"):
-                        ca, cb, cc = st.columns(3)
-                        ca.metric("POD", f"{s['pod_contrib']:.1f}", f"{s['pct_pod']:.0f}% total")
-                        cb.metric("PAC", f"{s['pac_contrib']:.1f}", f"{s['pct_pac']:.0f}% total")
-                        cc.metric("kcal", f"{s['kcal_estimadas']:.0f}")
-                        st.caption(f"Sabor: {s['efecto_sabor']} · Dulzor: {s['perfil_dulzor']}")
-                        if s["warning"]:
-                            st.warning(s["warning"])
-            else:
-                st.info("No se detectan edulcorantes significativos.")
-
-            # ── Análisis de Proteínas ─────────────────────────────────────────
-            st.divider()
-            st.subheader("💪 Proteínas")
-            totals_tmp = calc.calc_totals(lines_for_calculator)
-            pct_tmp    = calc.calc_percentages(totals_tmp)
-            prot_data  = calc.analyze_protein(
-                lines_for_calculator, totals_tmp, pct_tmp, product_type
-            )
-            if prot_data and prot_data.get('fuentes'):
-                # Métricas principales
-                p1, p2, p3 = st.columns(3)
-                p1.metric("Proteína total",
-                          f"{prot_data['protein_total_g']:.1f} g",
-                          f"{prot_data['protein_per_100g']:.1f} g/100g")
-                p2.metric("Tipo dominante", prot_data['tipo_dominante'].capitalize())
-
-                claim = prot_data.get('claim')
-                if claim == 'alto_proteina':
-                    p3.metric("Claim", "✅ Alto en proteína", "≥10 g/100g")
-                elif claim == 'fuente_proteina':
-                    p3.metric("Claim", "✅ Fuente de proteína", "≥5 g/100g")
-                else:
-                    p3.metric("Claim", "—", f"{prot_data['protein_per_100g']:.1f} g/100g")
-
-                # Scores funcionales
-                sc1, sc2 = st.columns(2)
-                espuma_bar = int(prot_data['score_espuma'] / 5 * 100)
-                gel_bar    = int(prot_data['score_gel']    / 5 * 100)
-                sc1.progress(espuma_bar,
-                             text=f"Capacidad espuma/overrun: {prot_data['score_espuma']:.1f}/5")
-                sc2.progress(gel_bar,
-                             text=f"Capacidad gel/cuerpo: {prot_data['score_gel']:.1f}/5")
-
-                # Desglose por tipo
-                if prot_data['pct_por_tipo']:
-                    tipo_str = " · ".join(
-                        f"{t.capitalize()}: {v:.0f}%"
-                        for t, v in sorted(prot_data['pct_por_tipo'].items(),
-                                           key=lambda x: -x[1])
-                    )
-                    st.caption(f"Distribución: {tipo_str}")
-
-                # Fuentes individuales
-                for f in prot_data['fuentes']:
-                    with st.expander(
-                        f"**{f['nombre']}** — {f['proteina_g']:.1f} g prot "
-                        f"({f['tipo']})"
-                    ):
-                        fa, fb, fc = st.columns(3)
-                        fa.metric("Proteína", f"{f['proteina_g']:.1f} g")
-                        fb.metric("Espuma", f"{f['espuma']}/5")
-                        fc.metric("Gel", f"{f['gel']}/5")
-                        if f['t_denat']:
-                            st.caption(f"🌡️ Desnaturaliza a {f['t_denat']}°C")
-                        if f['nota']:
-                            st.info(f['nota'])
-
-                # Advertencias de proceso
-                for adv in prot_data.get('advertencias', []):
-                    st.warning(adv)
-
-                # Recomendaciones
-                if prot_data.get('recomendaciones'):
-                    for r in prot_data['recomendaciones']:
-                        icon = "🔴" if r['priority'] == 'critical' else \
-                               "🟡" if r['priority'] == 'important' else "🔵"
-                        with st.expander(f"{icon} {r['titulo']}"):
-                            st.write(r['texto'])
-                else:
-                    st.success("✅ Perfil proteico adecuado para este tipo de producto.")
-            else:
-                st.info("No se detectan fuentes proteicas significativas en esta receta.")
-            st.divider()
-            st.subheader("🧪 Estabilizantes")
-            totals_tmp = calc.calc_totals(lines_for_calculator)
-            pct_tmp    = calc.calc_percentages(totals_tmp)
-            stab_recs  = calc.recommend_stabilizers(
-                totals_tmp, pct_tmp, product_type, machine, active_ingredient_names
-            )
-            if stab_recs:
-                for rec in stab_recs:
-                    icon = "🔴" if rec["priority"] == "necesario" else \
-                           "🟡" if rec["priority"] == "recomendado" else "🔵"
-                    with st.expander(f"{icon} **{rec['stabilizer']}** — {rec['dose_g_recipe']}"):
-                        st.write(f"**Dosis/kg:** {rec['dose_g_per_kg']}")
-                        st.write(rec["reason"])
-                        if rec.get("warning"):
-                            st.warning(rec["warning"])
-            else:
-                st.success("✅ Sin estabilizantes adicionales necesarios.")
-
-    # ── Panel analítico derecho ───────────────────────────────────────────────
+    # ── Panel analítico ───────────────────────────────────────────────────────
     with col_panel:
         st.subheader("📊 Análisis")
 
+        targets_default = calc._get_targets(product_type, machine)
+        config_override = st.session_state.config_params.get(f"{product_type}_{machine}", {})
+
         if not lines_for_calculator:
             st.info("👋 Selecciona ingredientes y gramos para ver el análisis.")
-            if "Creami" in machine:
-                st.markdown("""
-| Parámetro | Ninja Creami |
-|-----------|-------------|
-| ST % | 28 – 38 % |
-| Grasa % | 4 – 15 % |
-| MSNF % | 5 – 10 % |
-| Azúcares % | 13 – 22 % |
-| POD | 125 – 200 |
-| PAC | 120 – 260 |
-| Agua libre | 50 – 72 % |
+            tg = targets_default
+            if is_creami:
+                st.markdown(f"""
+| Parámetro | Rango objetivo |
+|-----------|---------------|
+| ST % | {tg['st'][0]} – {tg['st'][1]} % |
+| Grasa % | {tg['fat'][0]} – {tg['fat'][1]} % |
+| MSNF % | {tg['msnf'][0]} – {tg['msnf'][1]} % |
+| Azúcares % | {tg['sugars'][0]} – {tg['sugars'][1]} % |
+| POD | {tg['pod'][0]} – {tg['pod'][1]} |
+| PAC | {tg['pac'][0]} – {tg['pac'][1]} |
+| Ratio ST/Agua | {tg['st_water'][0]:.2f} – {tg['st_water'][1]:.2f} |
 """)
         else:
             totals  = calc.calc_totals(lines_for_calculator)
             pct     = calc.calc_percentages(totals)
-            # MEJORA: calc_derived recibe lines_with_ings para detección real de alcohol
             derived = calc.calc_derived(
                 totals, pct,
                 product_type=product_type,
                 machine=machine,
-                lines_with_ings=lines_for_calculator
+                lines_with_ings=lines_for_calculator,
+                config=config_override or None,
             )
-            # MEJORA: calc_calories recibe lines_with_ings para descontar zero_calorie
             kcal = calc.calc_calories(totals, lines_for_calculator)
 
-            # Métricas
+            # Métricas rápidas
             m1, m2 = st.columns(2)
             m1.metric("Masa total", f"{totals['grams']:.1f} g")
             m2.metric("Costo est.", f"${totals['cost']:.2f}")
 
             # Llenado del pote Creami
-            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
+            if is_creami:
                 cap  = 640 if machine == MACHINE_CREAMI_DELUXE else 430
                 masa = totals["grams"]
                 pct_pote = min(masa / cap * 100, 110)
@@ -366,84 +231,88 @@ with tab_form:
                     msg = f"⚠️ Pote poco lleno ({masa:.0f} g / {cap} g)"
                 st.progress(min(int(pct_pote), 100), text=msg)
 
-            # Calorías
+            # ── Calorías + clasificación ──────────────────────────────────────
             st.write("### 🔥 Calorías")
-            k1, k2 = st.columns(2)
+            cal_class  = kcal.get('clasificacion_calorica')
+            prot_class = kcal.get('clasificacion_proteica')
+            k1, k2, k3 = st.columns(3)
             k1.metric("/ 100 g",        f"{kcal['kcal_per_100g']:.0f} kcal")
             k2.metric("/ porción 120g", f"{kcal['kcal_per_100g'] * 1.2:.0f} kcal")
-            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
-                st.caption(f"Pote completo: **{kcal['kcal_per_pote_deluxe']:.0f} kcal**")
+            if is_creami:
+                k3.metric("Pote completo", f"{kcal['kcal_per_pote_deluxe']:.0f} kcal")
 
-            # Composición
-            st.write("### 🧪 Composición")
-            targets = derived.get("targets", {})
+            if cal_class:
+                color = {"muy_ligero": "success", "ligero": "success",
+                         "moderado": "info", "denso": "warning", "muy_denso": "error"}
+                fn = getattr(st, color.get(cal_class['key'], 'info'))
+                fn(f"{cal_class['emoji']} **{cal_class['etiqueta']}** — {cal_class['desc']}")
 
-            def show_param(label, val, key, unit="%"):
-                s   = derived["status"].get(key, "ok")
-                b   = "🔺" if s == "high" else "🔻" if s == "low" else "✅"
-                tgt = targets.get(key)
-                lo, hi = (tgt if tgt else (None, None))
-                if lo is not None and hi is not None:
-                    rng = f" _(obj {lo}-{hi}{unit})_"
-                elif hi is not None:
-                    rng = f" _(máx {hi}{unit})_"
-                else:
-                    rng = ""
-                st.write(f"- **{label}:** {val:.1f}{unit} {b}{rng}")
+            if prot_class:
+                st.caption(
+                    f"{prot_class['emoji']} **Proteína:** {prot_class['valor']:.1f} g/100g — "
+                    f"{prot_class['etiqueta']}  \n_{prot_class['desc']}_"
+                )
 
-            show_param("ST",        pct.get("st_pct",    0), "st")
-            show_param("Grasa",     pct.get("fat_pct",   0), "fat")
-            show_param("MSNF",      pct.get("msnf_pct",  0), "msnf")
-            show_param("Azúcares",  pct.get("sugars_pct",0), "sugars")
-            show_param("Agua libre",pct.get("water_pct", 0), "water")
+            # ── Composición ───────────────────────────────────────────────────
+            tg = derived.get('targets', targets_default)
+            st.write("### 🧬 Composición")
 
-            pod_v = pct.get("pod_total", 0)
-            pac_v = pct.get("pac_total", 0)
-            pod_s = derived["status"].get("pod", "ok")
-            pac_s = derived["status"].get("pac", "ok")
-            st.write(f"- **POD:** {pod_v:.0f} {'✅' if pod_s=='ok' else '🔺' if pod_s=='high' else '🔻'}")
-            st.write(f"- **PAC:** {pac_v:.0f} {'✅' if pac_s=='ok' else '🔺' if pac_s=='high' else '🔻'}")
-            st.write(f"- **ST/Agua:** {derived.get('ratio_st_water', 0):.3f}")
+            def metric_row(label, val, lo, hi, unit="%"):
+                s = calc._status(val, lo, hi)
+                icon = {'ok': '✅', 'low': '🔵', 'high': '🔴', 'empty': '⬜'}.get(s, '❓')
+                delta = None
+                if s == 'low':  delta = f"↑ mín {lo}{unit}"
+                elif s == 'high': delta = f"↓ máx {hi}{unit}"
+                st.metric(f"{icon} {label}", f"{val:.1f}{unit}", delta=delta,
+                          delta_color="inverse" if s in ('low', 'high') else "normal")
 
-            # Alcohol detectado
-            alc = derived.get("alcohol_detected")
-            if alc:
-                st.write("### 🍷 Alcohol")
-                pct_etanol = alc['ethanol_pct']
-                color = "🔴" if pct_etanol > 4 else "🟡" if pct_etanol > 2.5 else "🟢"
-                st.write(f"{color} Etanol estimado: **{alc['ethanol_total_g']:.1f} g** "
-                         f"({pct_etanol:.2f}% de la mezcla)")
-                for a in alc['lines']:
-                    st.caption(f"· {a['ingredient_name']}: {a['ethanol_g']:.1f} g etanol "
-                               f"({a['ethanol_fraction']*100:.0f}% vol equiv.)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                metric_row("ST",     pct.get('st_pct', 0),     *tg['st'])
+                metric_row("Grasa",  pct.get('fat_pct', 0),    *tg['fat'])
+            with c2:
+                metric_row("MSNF",   pct.get('msnf_pct', 0),   *tg['msnf'])
+                metric_row("Azúcar", pct.get('sugars_pct', 0), *tg['sugars'])
+            with c3:
+                metric_row("POD",    pct.get('pod_total', 0),  *tg['pod'], unit="")
+                metric_row("PAC",    pct.get('pac_total', 0),  *tg['pac'], unit="")
 
-            # Crioscopía
+            # Ratio ST/Agua
+            stw   = derived.get('st_water_ratio', 0)
+            stw_lo, stw_hi = tg.get('st_water', (0.42, 0.78))
+            stw_s = calc._status(stw, stw_lo, stw_hi)
+            stw_icon = {'ok': '✅', 'low': '🔵', 'high': '🔴'}.get(stw_s, '❓')
+            st.metric(
+                f"{stw_icon} Ratio ST/Agua",
+                f"{stw:.3f}",
+                delta=f"rango {stw_lo:.2f}–{stw_hi:.2f}",
+                delta_color="normal"
+            )
+
+            # ── Crioscopía ────────────────────────────────────────────────────
             st.write("### ❄️ Crioscopía")
             dt = derived.get("delta_t", 0)
-            model = derived.get("cryoscopy_model", "")
-            st.info(f"**ΔT:** {dt:.2f} °C  _{model}_")
-            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
+            if is_creami:
                 if derived.get("congela_ok"):
-                    st.success("✅ Congela correctamente a −18 °C")
+                    st.success(f"✅ ΔT {dt:.2f}°C — congela correctamente a −18°C")
                 else:
-                    st.warning("⚠️ ΔT insuficiente a −18 °C — sube el PAC")
-            ts = derived.get("temp_servicio", "")
-            if ts:
-                st.caption(f"🌡️ {ts}")
+                    st.warning(f"⚠️ ΔT {dt:.2f}°C — insuficiente a −18°C. Sube el PAC.")
+            else:
+                st.info(f"**ΔT:** {dt:.2f} °C")
 
-            # Actividad de Agua (MEJORA: ahora visible en UI)
+            # ── Actividad de Agua ─────────────────────────────────────────────
             st.write("### 💧 Actividad de Agua")
             aw_data = calc.calc_water_activity(totals)
             aw_icon = "✅" if aw_data['riesgo_micro'] == 'bajo' else \
                       "⚠️" if aw_data['riesgo_micro'] == 'medio' else "🔴"
             aw1, aw2 = st.columns(2)
-            aw1.metric("Aw estimada", f"{aw_data['aw']:.4f}")
+            aw1.metric("Aw estimada",  f"{aw_data['aw']:.4f}")
             aw2.metric("Riesgo micro", aw_data['riesgo_micro'].capitalize())
             with st.expander(f"{aw_icon} Interpretación Aw"):
                 st.write(aw_data['interpretacion'])
                 st.caption(f"Modelo: {aw_data['modelo']}")
 
-            # Validación Brix (MEJORA: ahora visible en UI si hay medición)
+            # ── Brix ──────────────────────────────────────────────────────────
             if brix_medido > 0:
                 st.write("### 🔭 Validación Brix")
                 bx = calc.validate_brix(brix_medido, totals)
@@ -453,30 +322,53 @@ with tab_form:
                 bx3.metric("Delta",    f"{bx['delta_brix']:+.2f}°")
                 with st.expander("Interpretación Brix"):
                     st.write(bx['interpretacion'])
-                    st.caption(
-                        f"Brix puro (azúcares): {bx['brix_calculado']:.1f}° · "
-                        f"Azúcar estimado desde Brix medido: {bx['sugars_estimados_g']:.1f} g"
-                    )
 
-            # Overrun
+            # ── Overrun ───────────────────────────────────────────────────────
             st.write("### 📐 Overrun")
             or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
-            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
+
+            if is_creami:
                 cap_label = "24oz" if machine == MACHINE_CREAMI_DELUXE else "16oz"
-                o1, o2 = st.columns(2)
-                o1.metric(f"Potes Creami {cap_label}", f"{or_d['potes_total']:.1f}")
-                o2.metric("Masa/pote",                 f"{or_d['masa_por_pote_g']:.0f} g")
+                o1, o2, o3 = st.columns(3)
+                o1.metric(f"Potes base ({cap_label})", f"{or_d['potes_base']:.1f}")
+                o2.metric("Overrun fijo",  f"~{or_d['overrun_fijo_pct']}%")
+                o3.metric("Masa final est.", f"{or_d['masa_final_estimada_g']:.0f} g")
                 if or_d.get("masa_ultimo_pote_g", 0) > 10:
-                    st.caption(f"🫙 Último pote: {or_d['masa_ultimo_pote_g']:.0f} g")
+                    st.caption(f"🫙 Último pote: {or_d['masa_ultimo_pote_g']:.0f} g de base")
+                st.caption(
+                    "ℹ️ El overrun de la Ninja Creami es **mecánico y fijo** (~40-60%). "
+                    "No es configurable — depende del proceso de creamify, "
+                    "no de la formulación en sí."
+                )
             else:
                 o1, o2 = st.columns(2)
-                o1.metric("Beakers",    f"{or_d['pacojet_beakers']}")
-                o2.metric("Mix/beaker", f"{or_d['mix_per_beaker']:.0f} g")
-            o3, o4 = st.columns(2)
-            o3.metric("Base necesaria",    f"{or_d['base_needed_g']:.0f} g")
-            o4.metric("Litros producidos", f"{or_d['liters_from_base']:.2f} L")
+                o1.metric("Base necesaria",    f"{or_d['base_needed_g']:.0f} g")
+                o2.metric("Litros producidos", f"{or_d['liters_from_base']:.2f} L")
 
-            # Diagnósticos
+            # ── Estabilizantes ────────────────────────────────────────────────
+            st.write("### 🧪 Estabilizantes")
+            stab_recs = calc.recommend_stabilizers(
+                totals, pct, product_type, machine,
+                ingredient_names=active_ingredient_names
+            )
+            if not stab_recs:
+                st.success("✅ Sin recomendaciones de estabilizante.")
+            else:
+                for r in stab_recs:
+                    icon = "🔴" if r['priority'] == 'necesario' else \
+                           "🟡" if r['priority'] == 'recomendado' else "🔵"
+                    with st.expander(f"{icon} {r['stabilizer']} — {r['dose_g_per_kg']}"):
+                        st.write(f"**Dosis en receta:** {r['dose_g_recipe']}")
+                        st.write(f"**Razón:** {r['reason']}")
+                        if r.get('warning'):
+                            st.warning(r['warning'])
+                        alts = r.get('alternativas', [])
+                        if alts:
+                            st.write("**Alternativas (elige la que tengas disponible):**")
+                            for alt in alts:
+                                st.write(f"- {alt}")
+
+            # ── Diagnósticos ──────────────────────────────────────────────────
             st.write("### 🚨 Diagnósticos")
             diags_visibles = [d for d in derived.get("diagnostics", [])
                               if d["key"] not in DIAGS_EXCLUIR_TICKET]
@@ -489,7 +381,7 @@ with tab_form:
                     with st.expander(f"{icon} {d['title']}"):
                         st.write(d["tip"])
 
-            # Exportar ticket
+            # ── Exportar ticket ───────────────────────────────────────────────
             st.divider()
             st.download_button(
                 "⬇️ Descargar ticket (.txt)",
@@ -530,8 +422,7 @@ with tab_recetas:
     else:
         search = st.text_input("🔍 Buscar receta", placeholder="Escribe parte del nombre...")
         if search:
-            all_recipes = [r for r in all_recipes
-                           if search.lower() in r["name"].lower()]
+            all_recipes = [r for r in all_recipes if search.lower() in r["name"].lower()]
 
         for rec in all_recipes:
             with st.expander(f"**{rec['name']}** — {rec['product_type']} · {rec['machine']}"):
@@ -568,7 +459,6 @@ with tab_recetas:
                     if st.button("🗑️ Eliminar", key=f"del_{rec['id']}", use_container_width=True):
                         db.delete_recipe(rec["id"])
                         st.warning(f"Receta «{rec['name']}» eliminada.")
-                        st.rerun()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -588,7 +478,6 @@ with tab_ingredientes:
 
         search_ing = st.text_input("🔍 Buscar ingrediente", key="search_ing",
                                    placeholder="Nombre o categoría...")
-
         cats = sorted(set(i["category"] for i in all_ings))
         cat_filter = st.selectbox("Filtrar por categoría", ["Todas"] + cats, key="cat_filter")
 
@@ -625,54 +514,61 @@ with tab_ingredientes:
                     if st.button("🗑️ Eliminar", key=f"btn_del_ing_{ing['id']}",
                                  use_container_width=True):
                         db.delete_ingredient(ing["id"])
-                        # MEJORA: invalidar cache al eliminar
                         _invalidate_ingredient_cache()
                         st.warning(f"«{ing['name']}» eliminado.")
-                        st.rerun()
 
-                if st.session_state.get(f"edit_open_{ing['id']}", False):
-                    st.divider()
-                    with st.form(key=f"form_edit_{ing['id']}"):
-                        st.write("**Editar ingrediente**")
-                        e_name  = st.text_input("Nombre",    value=ing["name"])
-                        e_cat   = st.text_input("Categoría", value=ing["category"])
-                        c1e, c2e, c3e, c4e = st.columns(4)
-                        e_fat   = c1e.number_input("Grasa %",    value=float(ing["fat"] or 0),    step=0.1)
-                        e_msnf  = c2e.number_input("MSNF %",     value=float(ing["msnf"] or 0),   step=0.1)
-                        e_sug   = c3e.number_input("Azúcares %", value=float(ing["sugars"] or 0), step=0.1)
-                        e_water = c4e.number_input("Agua %",     value=float(ing["water"] or 0),  step=0.1)
-                        c5e, c6e, c7e, c8e = st.columns(4)
-                        e_pod   = c5e.number_input("POD",        value=float(ing["pod"] or 0),    step=0.01)
-                        e_pac   = c6e.number_input("PAC",        value=float(ing["pac"] or 0),    step=0.01)
-                        e_ost   = c7e.number_input("Otros ST %", value=float(ing["other_st"] or 0), step=0.1)
-                        e_price = c8e.number_input("Precio/kg $",value=float(ing.get("price_per_kg", 0) or 0), step=0.5)
-                        e_notes = st.text_area("Notas", value=ing.get("notes", ""))
-                        e_func  = st.text_input("Función", value=ing.get("function", ""))
-
-                        if st.form_submit_button("💾 Guardar cambios"):
-                            updated = {
-                                "id": ing["id"], "name": e_name, "category": e_cat,
-                                "fat": e_fat, "msnf": e_msnf, "sugars": e_sug,
-                                "other_st": e_ost, "pod": e_pod, "pac": e_pac,
-                                "water": e_water, "notes": e_notes, "function": e_func,
-                                "brix": ing.get("brix", 0), "ph": ing.get("ph", 0),
-                                "price_per_kg": e_price,
-                                "calories_per_100g": ing.get("calories_per_100g", 0),
-                                "zero_calorie": ing.get("zero_calorie", 0),
-                            }
-                            db.save_ingredient(updated)
-                            # MEJORA: invalidar cache al editar
+                if st.session_state.get(edit_key, False):
+                    with st.form(f"form_edit_{ing['id']}"):
+                        e_name  = st.text_input("Nombre", value=ing['name'])
+                        # Categoría: selectbox con lista predefinida + opción actual si no está
+                        cat_opts = INGREDIENT_CATEGORIES.copy()
+                        if ing['category'] not in cat_opts:
+                            cat_opts = [ing['category']] + cat_opts
+                        e_cat = st.selectbox("Categoría", cat_opts,
+                                             index=cat_opts.index(ing['category']))
+                        c1, c2, c3, c4 = st.columns(4)
+                        e_fat   = c1.number_input("Grasa %",    value=float(ing['fat']),    step=0.1)
+                        e_msnf  = c2.number_input("MSNF %",     value=float(ing['msnf']),   step=0.1)
+                        e_sug   = c3.number_input("Azúcares %", value=float(ing['sugars']), step=0.1)
+                        e_water = c4.number_input("Agua %",     value=float(ing['water']),  step=0.1)
+                        c5, c6, c7, c8 = st.columns(4)
+                        e_ost   = c5.number_input("Otros ST %", value=float(ing['other_st']), step=0.1)
+                        e_pod   = c6.number_input("POD",        value=float(ing['pod']),   step=0.01)
+                        e_pac   = c7.number_input("PAC",        value=float(ing['pac']),   step=0.01)
+                        e_price = c8.number_input("Precio/kg $",value=float(ing.get('price_per_kg', 0)), step=0.5)
+                        e_notes = st.text_area("Notas", value=ing.get('notes', ''))
+                        save_b, cancel_b = st.columns(2)
+                        if save_b.form_submit_button("💾 Guardar", use_container_width=True):
+                            updated = {**ing,
+                                       "name": e_name.strip(), "category": e_cat,
+                                       "fat": e_fat, "msnf": e_msnf, "sugars": e_sug,
+                                       "other_st": e_ost, "pod": e_pod, "pac": e_pac,
+                                       "water": e_water, "notes": e_notes,
+                                       "price_per_kg": e_price}
+                            db.update_ingredient(ing['id'], updated)
                             _invalidate_ingredient_cache()
-                            st.success(f"✅ «{e_name}» actualizado.")
-                            st.session_state[f"edit_open_{ing['id']}"] = False
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                        if cancel_b.form_submit_button("✖ Cancelar", use_container_width=True):
+                            st.session_state[edit_key] = False
                             st.rerun()
 
     with sub_nuevo:
         st.write("### Agregar ingrediente nuevo")
+        st.info(
+            "**Selecciona la categoría desde la lista predefinida.** "
+            "Esto mantiene la base de datos organizada y facilita el filtrado."
+        )
 
         with st.form("form_nuevo_ing"):
-            n_name  = st.text_input("Nombre *", placeholder="Ej: Leche de almendra sin azúcar")
-            n_cat   = st.text_input("Categoría *", placeholder="Ej: Vegetal, Lácteo, Azúcar...")
+            n_name = st.text_input("Nombre *", placeholder="Ej: Leche de almendra sin azúcar")
+
+            # Categoría: SIEMPRE desde lista predefinida (no texto libre)
+            n_cat = st.selectbox(
+                "Categoría *",
+                INGREDIENT_CATEGORIES,
+                help="Selecciona la categoría más apropiada. Esto organiza tu base de datos."
+            )
 
             st.write("**Composición centesimal** (valores en %)")
             col1, col2, col3, col4 = st.columns(4)
@@ -689,8 +585,10 @@ with tab_ingredientes:
                                         help="Poder Anticongelante relativo a sacarosa=1.0")
             n_price = col8.number_input("Precio/kg $", 0.0, step=0.5)
 
-            n_notes = st.text_area("Notas técnicas", placeholder="Temperatura de gelificación, pH, etc.")
-            n_func  = st.text_input("Función principal", placeholder="Ej: Base proteica, Emulsionante")
+            n_notes  = st.text_area("Notas técnicas", placeholder="Temperatura de gelificación, pH, etc.")
+            n_func   = st.text_input("Función principal", placeholder="Ej: Base proteica, Emulsionante")
+            n_zero_c = st.checkbox("Zero calorie (eritritol, stevia, alulosa, etc.)",
+                                   help="Marca si este ingrediente no aporta calorías netas.")
 
             suma = n_fat + n_msnf + n_sug + n_ost + n_water
             if suma > 0:
@@ -699,23 +597,129 @@ with tab_ingredientes:
 
             submitted = st.form_submit_button("➕ Agregar ingrediente", use_container_width=True)
             if submitted:
-                if not n_name.strip() or not n_cat.strip():
-                    st.error("Nombre y categoría son obligatorios.")
+                if not n_name.strip():
+                    st.error("El nombre es obligatorio.")
                 else:
                     nuevo = {
-                        "name": n_name.strip(), "category": n_cat.strip(),
+                        "name": n_name.strip(), "category": n_cat,
                         "fat": n_fat, "msnf": n_msnf, "sugars": n_sug,
                         "other_st": n_ost, "pod": n_pod, "pac": n_pac,
                         "water": n_water, "notes": n_notes, "function": n_func,
                         "brix": 0, "ph": 0,
                         "price_per_kg": n_price,
-                        "calories_per_100g": 0, "zero_calorie": 0,
+                        "calories_per_100g": 0,
+                        "zero_calorie": 1 if n_zero_c else 0,
                     }
                     try:
                         db.save_ingredient(nuevo)
-                        # MEJORA: invalidar cache al agregar
                         _invalidate_ingredient_cache()
-                        st.success(f"✅ «{n_name}» agregado a la base de datos.")
-                        st.rerun()
-                    except Exception as ex:
-                        st.error(f"Error al guardar: {ex}")
+                        st.success(f"✅ «{n_name}» agregado como [{n_cat}].")
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 4 — CONFIGURACIÓN DE PARÁMETROS
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_config:
+    st.subheader("⚙️ Configuración de Parámetros de Composición")
+    st.markdown(
+        "Aquí puedes **ajustar los rangos objetivo** para cada combinación de "
+        "tipo de producto y máquina. Útil para prueba y error — experimenta con rangos "
+        "más estrictos o más permisivos según tus observaciones de cata.  \n"
+        "Los cambios se aplican **inmediatamente** en el Formulador."
+    )
+    st.info("Los valores por defecto son los estándares científicos de la heladería artesanal. "
+            "Modificarlos es tu laboratorio personal.")
+
+    cfg_product = st.selectbox("Tipo de producto", PRODUCT_TYPES, key="cfg_product")
+    cfg_machine = st.selectbox("Máquina",          MACHINES,      key="cfg_machine")
+
+    cfg_key     = f"{cfg_product}_{cfg_machine}"
+    defaults    = calc._get_targets(cfg_product, cfg_machine)
+    saved_cfg   = st.session_state.config_params.get(cfg_key, {})
+
+    def cfg_val(k, idx):
+        """Lee valor guardado o default."""
+        return saved_cfg.get(k, defaults[k])[idx] if k in defaults else 0.0
+
+    st.write(f"#### Rangos para: **{cfg_product}** · **{cfg_machine}**")
+    st.caption("Modifica los mínimos y máximos. Deja en blanco (0) si no aplica.")
+
+    with st.form("form_config"):
+        st.write("**Sólidos Totales (ST %)**")
+        c1, c2 = st.columns(2)
+        st_lo = c1.number_input("ST mín %", 0.0, 60.0, float(cfg_val('st', 0)), step=0.5)
+        st_hi = c2.number_input("ST máx %", 0.0, 60.0, float(cfg_val('st', 1)), step=0.5)
+
+        st.write("**Grasa (%)**")
+        c1, c2 = st.columns(2)
+        fat_lo = c1.number_input("Grasa mín %", 0.0, 40.0, float(cfg_val('fat', 0)), step=0.5)
+        fat_hi = c2.number_input("Grasa máx %", 0.0, 40.0, float(cfg_val('fat', 1)), step=0.5)
+
+        st.write("**MSNF (%)**")
+        c1, c2 = st.columns(2)
+        msnf_lo = c1.number_input("MSNF mín %", 0.0, 20.0, float(cfg_val('msnf', 0)), step=0.5)
+        msnf_hi = c2.number_input("MSNF máx %", 0.0, 20.0, float(cfg_val('msnf', 1)), step=0.5)
+
+        st.write("**Azúcares (%)**")
+        c1, c2 = st.columns(2)
+        sug_lo = c1.number_input("Azúcares mín %", 0.0, 40.0, float(cfg_val('sugars', 0)), step=0.5)
+        sug_hi = c2.number_input("Azúcares máx %", 0.0, 40.0, float(cfg_val('sugars', 1)), step=0.5)
+
+        st.write("**POD**")
+        c1, c2 = st.columns(2)
+        pod_lo = c1.number_input("POD mín", 0.0, 300.0, float(cfg_val('pod', 0)), step=5.0)
+        pod_hi = c2.number_input("POD máx", 0.0, 300.0, float(cfg_val('pod', 1)), step=5.0)
+
+        st.write("**PAC**")
+        c1, c2 = st.columns(2)
+        pac_lo = c1.number_input("PAC mín", 0.0, 500.0, float(cfg_val('pac', 0)), step=5.0)
+        pac_hi = c2.number_input("PAC máx", 0.0, 500.0, float(cfg_val('pac', 1)), step=5.0)
+
+        st.write("**Ratio ST/Agua**")
+        st.caption(
+            "Relación sólidos totales / agua libre. Indicador de concentración de la mezcla. "
+            "Valor bajo → demasiada agua libre (cristalización). "
+            "Valor alto → mezcla sobreconcentrada (textura pastosa)."
+        )
+        c1, c2 = st.columns(2)
+        stw_lo = c1.number_input("ST/Agua mín", 0.0, 2.0, float(cfg_val('st_water', 0)), step=0.01)
+        stw_hi = c2.number_input("ST/Agua máx", 0.0, 2.0, float(cfg_val('st_water', 1)), step=0.01)
+
+        col_save, col_reset = st.columns(2)
+        save_clicked  = col_save.form_submit_button("💾 Guardar configuración", use_container_width=True)
+        reset_clicked = col_reset.form_submit_button("🔄 Restaurar defaults",   use_container_width=True)
+
+        if save_clicked:
+            st.session_state.config_params[cfg_key] = {
+                'st':       (st_lo,  st_hi),
+                'fat':      (fat_lo, fat_hi),
+                'msnf':     (msnf_lo, msnf_hi),
+                'sugars':   (sug_lo, sug_hi),
+                'pod':      (pod_lo, pod_hi),
+                'pac':      (pac_lo, pac_hi),
+                'st_water': (stw_lo, stw_hi),
+            }
+            st.success(f"✅ Configuración guardada para **{cfg_product}** · **{cfg_machine}**")
+
+        if reset_clicked:
+            if cfg_key in st.session_state.config_params:
+                del st.session_state.config_params[cfg_key]
+            st.success("✅ Parámetros restaurados a los valores por defecto.")
+            st.rerun()
+
+    # Mostrar configuraciones activas
+    if st.session_state.config_params:
+        st.divider()
+        st.write("#### Configuraciones activas (personalizadas)")
+        for key, vals in st.session_state.config_params.items():
+            prod, mach = key.split("_", 1)
+            st.caption(f"**{prod} · {mach}:** "
+                       f"ST {vals['st'][0]}-{vals['st'][1]}% | "
+                       f"Grasa {vals['fat'][0]}-{vals['fat'][1]}% | "
+                       f"POD {vals['pod'][0]}-{vals['pod'][1]} | "
+                       f"PAC {vals['pac'][0]}-{vals['pac'][1]}")
+    else:
+        st.divider()
+        st.caption("Sin personalizaciones activas. Usando parámetros científicos por defecto.")
