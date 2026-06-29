@@ -22,17 +22,22 @@ PRODUCT_TYPES = [
 ]
 
 # ── Máquinas ──────────────────────────────────────────────────────────────────
+# NOTA: Pacojet eliminado. Solo Ninja Creami y Mantecadora Tradicional.
 MACHINE_CREAMI_DELUXE   = "Ninja Creami Deluxe"
 MACHINE_CREAMI_STANDARD = "Ninja Creami Standard"
-MACHINE_PACOJET         = "Pacojet"
 MACHINE_MANTECADORA     = "Mantecadora Tradicional"
 
 MACHINES = [
     MACHINE_CREAMI_DELUXE,
     MACHINE_CREAMI_STANDARD,
-    MACHINE_PACOJET,
     MACHINE_MANTECADORA,
 ]
+
+# ── Overrun fijo estimado Ninja Creami (no configurable — es mecánico) ────────
+CREAMI_OVERRUN_PCT = {
+    MACHINE_CREAMI_DELUXE:   50,   # 40-60%, mediana empírica
+    MACHINE_CREAMI_STANDARD: 45,   # 35-55%, mediana empírica
+}
 
 # ── Prioridades de diagnóstico ────────────────────────────────────────────────
 PRIORITY_CRITICAL   = "critical"
@@ -42,7 +47,49 @@ PRIORITY_ADJUSTABLE = "adjustable"
 # ── Diagnósticos excluidos del ticket de producción ───────────────────────────
 DIAGS_EXCLUIR_TICKET = {"creami_overrun_hint"}
 
-# ── Categorías de ingredientes ────────────────────────────────────────────────
+# ── Categorías de ingredientes (lista maestra — uso obligatorio en BD) ────────
+INGREDIENT_CATEGORIES = [
+    "Lácteo – Leche líquida",
+    "Lácteo – Crema / Nata",
+    "Lácteo – Leche en polvo",
+    "Lácteo – Queso / Ricotta",
+    "Lácteo – Otro",
+    "Vegetal – Leche vegetal",
+    "Vegetal – Crema vegetal",
+    "Vegetal – Pulpa / Puré de fruta",
+    "Vegetal – Fruta fresca / congelada",
+    "Vegetal – Fruta seca",
+    "Vegetal – Otro",
+    "Azúcar – Sacarosa",
+    "Azúcar – Dextrosa / Glucosa",
+    "Azúcar – Fructosa",
+    "Azúcar – Trehalosa",
+    "Azúcar – Alulosa",
+    "Azúcar – Eritritol",
+    "Azúcar – Glucosa líquida / DE40",
+    "Azúcar – Azúcar invertido",
+    "Azúcar – Otro",
+    "Edulcorante intensivo",
+    "Estabilizante – Goma",
+    "Estabilizante – CMC / Celulosa",
+    "Estabilizante – Pectina",
+    "Estabilizante – Almidón modificado",
+    "Estabilizante – Otro",
+    "Emulsionante",
+    "Proteína – Suero (WPC/WPI)",
+    "Proteína – Caseína / MPC",
+    "Proteína – Vegetal",
+    "Proteína – Huevo",
+    "Saborizante – Cacao / Chocolate",
+    "Saborizante – Extracto / Esencia",
+    "Saborizante – Pasta / Base",
+    "Saborizante – Especias",
+    "Inclusions – Trozos / Mix-ins",
+    "Alcohol",
+    "Otro",
+]
+
+# ── Categoría de alcohol (para detección de etanol) ───────────────────────────
 CATEGORY_ALCOHOL = "Alcohol"
 
 # Fracción másica de etanol puro según graduación típica de cada licor.
@@ -76,242 +123,59 @@ ALCOHOL_ETHANOL_FRACTION = {
 
 # ── Perfiles de fuentes proteicas ─────────────────────────────────────────────
 # Cada entrada describe una fuente proteica identificable por substring del nombre.
-#
-# Campos:
-#   protein_fraction  — fracción de proteína sobre masa total del ingrediente (protein_in_total=True)
-#                       o sobre MSNF del ingrediente (protein_in_total=False)
-#   protein_in_total  — True: fracción sobre masa; False: fracción sobre MSNF
-#   tipo              — 'caseína' | 'suero' | 'vegetal' | 'huevo' | 'lácteo_mixto'
-#   solubilidad       — 'micelar' | 'soluble' | 'coloidal'
-#   t_desnaturaliz_c  — temperatura de desnaturalización (°C)
-#   capacidad_espuma  — 1-5 (5=máxima aportación al overrun)
-#   capacidad_gel     — 1-5 (5=máxima aportación al cuerpo en congelación)
-#   nota              — comportamiento relevante en formulación de helado
-#
-# Fuentes: Fox & McSweeney "Advanced Dairy Chemistry Vol.1" (2003);
-#          Goff & Hartel "Ice Cream" 7th ed. (2013);
-#          Damodaran "Food Proteins and Their Applications" (1997)
+# protein_fraction: fracción de proteína sobre el peso del ingrediente (o del MSNF).
+# protein_in_total: True = fracción sobre gramos totales del ing.; False = sobre MSNF.
 PROTEIN_PROFILES = {
-    # ── Lácteos base ──────────────────────────────────────────────────────────
-    "leche en polvo descremada": {
-        "protein_fraction": 0.36,   # ~34-36% proteína sobre masa total
-        "protein_in_total": True,
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 3,
-        "capacidad_gel":    3,
-        "nota":             "Mezcla 80% caseína / 20% suero. "
-                            "Riesgo de arenado si MSNF supera umbral crítico.",
-    },
-    "leche en polvo entera": {
-        "protein_fraction": 0.26,
-        "protein_in_total": True,
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    2,
-        "nota":             "Grasa alta reduce funcionalidad proteica relativa.",
-    },
-    "leche entera": {
-        "protein_fraction": 0.36,   # ~36% del MSNF es proteína en leche
-        "protein_in_total": False,  # fracción sobre MSNF
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    2,
-        "nota":             "Proteína diluida. Contribuye estructura base.",
-    },
-    "leche descremada": {
-        "protein_fraction": 0.36,
-        "protein_in_total": False,
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 3,
-        "capacidad_gel":    2,
-        "nota":             "Sin grasa, mejor funcionalidad espumante relativa.",
-    },
-    "leche concentrada": {
-        "protein_fraction": 0.36,
-        "protein_in_total": False,
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 3,
-        "capacidad_gel":    3,
-        "nota":             "MSNF concentrado ~2.5×. Buena fuente de caseína micelar.",
-    },
-    # ── Caseína micelar ────────────────────────────────────────────────────────
-    "caseína micelar": {
-        "protein_fraction": 0.88,
-        "protein_in_total": True,
-        "tipo":             "caseína",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 140,    # muy termoestable
-        "capacidad_espuma": 2,
-        "capacidad_gel":    5,
-        "nota":             "Forma micelas que atrapan agua → cuerpo denso sin grasa. "
-                            "No desnaturaliza en pasteurización normal. "
-                            "Ideal para helado light con textura cremosa.",
-    },
-    "caseina micelar": {
-        "protein_fraction": 0.88,
-        "protein_in_total": True,
-        "tipo":             "caseína",
-        "solubilidad":      "micelar",
-        "t_desnaturaliz_c": 140,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    5,
-        "nota":             "Ver caseína micelar.",
-    },
-    # ── Proteína de suero ─────────────────────────────────────────────────────
-    "suero de leche": {
-        "protein_fraction": 0.12,
-        "protein_in_total": True,
-        "tipo":             "suero",
-        "solubilidad":      "soluble",
-        "t_desnaturaliz_c": 65,
-        "capacidad_espuma": 5,
-        "capacidad_gel":    3,
-        "nota":             "β-lactoglobulina espuma muy bien. "
-                            "No pasteurizar sobre 65°C.",
-    },
-    "wpc": {
-        "protein_fraction": 0.80,
-        "protein_in_total": True,
-        "tipo":             "suero",
-        "solubilidad":      "soluble",
-        "t_desnaturaliz_c": 65,
-        "capacidad_espuma": 5,
-        "capacidad_gel":    4,
-        "nota":             "WPC 80%: balance proteína/lactosa. "
-                            "Ideal para helado high-protein sin textura calcárea.",
-    },
-    "wpi": {
-        "protein_fraction": 0.90,
-        "protein_in_total": True,
-        "tipo":             "suero",
-        "solubilidad":      "soluble",
-        "t_desnaturaliz_c": 65,
-        "capacidad_espuma": 5,
-        "capacidad_gel":    4,
-        "nota":             "WPI 90%: mínima lactosa y grasa. "
-                            "Máxima densidad proteica. Gelifica fuerte en caliente.",
-    },
-    "proteína de suero": {
-        "protein_fraction": 0.80,
-        "protein_in_total": True,
-        "tipo":             "suero",
-        "solubilidad":      "soluble",
-        "t_desnaturaliz_c": 65,
-        "capacidad_espuma": 5,
-        "capacidad_gel":    4,
-        "nota":             "Excelente para overrun en helado light.",
-    },
-    # ── Vegetal ───────────────────────────────────────────────────────────────
-    "proteína de guisante": {
-        "protein_fraction": 0.80,
-        "protein_in_total": True,
-        "tipo":             "vegetal",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 85,
-        "capacidad_espuma": 3,
-        "capacidad_gel":    4,
-        "nota":             "PDCAAS 0.65. Sabor terroso — enmascarar con vainilla o cacao. "
-                            "Sin lactosa ni gluten.",
-    },
-    "proteína de soja": {
-        "protein_fraction": 0.90,
-        "protein_in_total": True,
-        "tipo":             "vegetal",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 80,
-        "capacidad_espuma": 4,
-        "capacidad_gel":    4,
-        "nota":             "PDCAAS 0.91. Mejor perfil de aminoácidos que guisante. "
-                            "Posible alérgeno.",
-    },
-    "proteína de arroz": {
-        "protein_fraction": 0.80,
-        "protein_in_total": True,
-        "tipo":             "vegetal",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 90,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    3,
-        "nota":             "PDCAAS 0.47. Neutro en sabor. "
-                            "Combinar con guisante para perfil de aminoácidos completo.",
-    },
-    # ── Huevo ─────────────────────────────────────────────────────────────────
-    "yema de huevo": {
-        "protein_fraction": 0.16,
-        "protein_in_total": True,
-        "tipo":             "huevo",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 70,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    5,
-        "nota":             "Principalmente emulsionante (lecitina). "
-                            "Gelifica fuerte sobre 70°C → base crème anglaise.",
-    },
-    "clara de huevo": {
-        "protein_fraction": 0.11,
-        "protein_in_total": True,
-        "tipo":             "huevo",
-        "solubilidad":      "soluble",
-        "t_desnaturaliz_c": 62,
-        "capacidad_espuma": 5,
-        "capacidad_gel":    3,
-        "nota":             "Ovalbúmina: espuma excepcional. "
-                            "Desnaturaliza a 62°C → pasteurizar con mucho cuidado.",
-    },
-    # ── Derivados ─────────────────────────────────────────────────────────────
-    "queso crema": {
-        "protein_fraction": 0.06,
-        "protein_in_total": True,
-        "tipo":             "caseína",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 80,
-        "capacidad_espuma": 1,
-        "capacidad_gel":    4,
-        "nota":             "Alta grasa domina. Proteína marginal. Aporta acidez pH ~4.8.",
-    },
-    "mascarpone": {
-        "protein_fraction": 0.04,
-        "protein_in_total": True,
-        "tipo":             "caseína",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 80,
-        "capacidad_espuma": 1,
-        "capacidad_gel":    3,
-        "nota":             "Muy graso — proteína marginal. No usar como fuente proteica.",
-    },
-    "yogur": {
-        "protein_fraction": 0.36,
-        "protein_in_total": False,
-        "tipo":             "lácteo_mixto",
-        "solubilidad":      "coloidal",
-        "t_desnaturaliz_c": 72,
-        "capacidad_espuma": 2,
-        "capacidad_gel":    3,
-        "nota":             "Proteína parcialmente desnaturalizada por acidez. "
-                            "Aporta textura cremosa en frozen yogurt.",
-    },
+    # Whey / suero
+    "wpc":            {"tipo": "suero",    "protein_fraction": 0.80, "protein_in_total": True,  "capacidad_espuma": 5, "capacidad_gel": 3, "solubilidad": "alta",    "t_desnaturaliz_c": 72,  "nota": "WPC 80% — excelente espumante"},
+    "wpi":            {"tipo": "suero",    "protein_fraction": 0.90, "protein_in_total": True,  "capacidad_espuma": 5, "capacidad_gel": 3, "solubilidad": "muy alta","t_desnaturaliz_c": 72,  "nota": "WPI 90% — máxima pureza suero"},
+    "proteína de suero": {"tipo": "suero", "protein_fraction": 0.80, "protein_in_total": True,  "capacidad_espuma": 5, "capacidad_gel": 3, "solubilidad": "alta",    "t_desnaturaliz_c": 72,  "nota": "Whey genérico 80%"},
+    "whey":           {"tipo": "suero",    "protein_fraction": 0.80, "protein_in_total": True,  "capacidad_espuma": 5, "capacidad_gel": 3, "solubilidad": "alta",    "t_desnaturaliz_c": 72,  "nota": "Whey protein"},
+    # Caseína
+    "caseína":        {"tipo": "caseína",  "protein_fraction": 0.90, "protein_in_total": True,  "capacidad_espuma": 2, "capacidad_gel": 5, "solubilidad": "micelar", "t_desnaturaliz_c": 140, "nota": "Caseína — alta gelificación, termoestable"},
+    "mpc":            {"tipo": "caseína",  "protein_fraction": 0.80, "protein_in_total": True,  "capacidad_espuma": 2, "capacidad_gel": 5, "solubilidad": "micelar", "t_desnaturaliz_c": 140, "nota": "MPC 80%"},
+    "leche en polvo descremada": {"tipo": "lácteo_mixto", "protein_fraction": 0.36, "protein_in_total": False, "capacidad_espuma": 3, "capacidad_gel": 3, "solubilidad": "micelar", "t_desnaturaliz_c": 75, "nota": "LPD — 36% del MSNF es proteína mixta"},
+    "leche en polvo": {"tipo": "lácteo_mixto", "protein_fraction": 0.36, "protein_in_total": False, "capacidad_espuma": 3, "capacidad_gel": 3, "solubilidad": "micelar", "t_desnaturaliz_c": 75, "nota": "Leche polvo — 36% MSNF"},
+    # Vegetal
+    "proteína de guisante": {"tipo": "vegetal", "protein_fraction": 0.82, "protein_in_total": True, "capacidad_espuma": 3, "capacidad_gel": 4, "solubilidad": "media", "t_desnaturaliz_c": 90, "nota": "Pea protein — buena gelificación vegana"},
+    "proteína de soya":     {"tipo": "vegetal", "protein_fraction": 0.90, "protein_in_total": True, "capacidad_espuma": 4, "capacidad_gel": 4, "solubilidad": "alta",  "t_desnaturaliz_c": 80, "nota": "Soy protein isolate"},
+    "proteína de arroz":    {"tipo": "vegetal", "protein_fraction": 0.80, "protein_in_total": True, "capacidad_espuma": 2, "capacidad_gel": 3, "solubilidad": "media", "t_desnaturaliz_c": 85, "nota": "Rice protein — poco espumante"},
+    # Huevo
+    "clara de huevo":  {"tipo": "huevo", "protein_fraction": 0.11, "protein_in_total": True, "capacidad_espuma": 5, "capacidad_gel": 4, "solubilidad": "alta",   "t_desnaturaliz_c": 60,  "nota": "Albumina — espumante excepcional; desnaturaliza a 60°C"},
+    "huevo entero":    {"tipo": "huevo", "protein_fraction": 0.13, "protein_in_total": True, "capacidad_espuma": 4, "capacidad_gel": 4, "solubilidad": "alta",   "t_desnaturaliz_c": 68,  "nota": "Huevo — yema aporta lecitina"},
+    "yema de huevo":   {"tipo": "huevo", "protein_fraction": 0.16, "protein_in_total": True, "capacidad_espuma": 3, "capacidad_gel": 5, "solubilidad": "micelar","t_desnaturaliz_c": 68,  "nota": "Yema — alta gelificación, lecitina natural"},
 }
 
-# Claims nutricionales EU 1924/2006 (referencia)
+# ── Umbrales de claim proteico (g proteína / 100 g producto) ─────────────────
 PROTEIN_CLAIM_THRESHOLDS = {
-    "fuente_proteina": 5.0,    # ≥ 5 g/100g producto final (≥10% VRN)
-    "alto_proteina":   10.0,   # ≥ 10 g/100g producto final (≥20% VRN)
+    "fuente_proteina": 5.0,    # ≥5 g/100g → "fuente de proteína"
+    "alto_proteina":   10.0,   # ≥10 g/100g → "alto en proteína"
 }
 
-# Rangos funcionales de proteína para helado (g proteína / 100g mezcla)
+# ── Targets funcionales de proteína para recomendaciones ─────────────────────
 PROTEIN_FUNCTIONAL_TARGETS = {
-    "minimo_estructura":  2.5,   # mínimo para overrun >30% sin grasa compensatoria
-    "optimo_light":       4.0,   # óptimo para helado light
-    "high_protein":       8.0,   # umbral para claim "alto contenido en proteínas"
-    "maximo_recomendado": 12.0,  # sobre este: riesgo de textura calcárea/granulosa
+    "minimo_estructura": 2.5,   # % mínimo para cuerpo en helado sin sorbet
+    "optimo_overrun":    3.5,   # % donde la espuma de overrun es más estable
+    "alto_proteina":    10.0,   # % target en helado proteico
+}
+
+# ── Clasificación calórica del helado ────────────────────────────────────────
+# Rangos por 100g de producto (base sin overrun)
+CALORIE_CLASSIFICATION = {
+    # (max_kcal, etiqueta, emoji, descripción)
+    "muy_ligero":  (80,  "Muy ligero",  "🥗", "Muy bajo en calorías — apto para dietas estrictas (< 80 kcal/100g)"),
+    "ligero":      (130, "Ligero",      "💚", "Bajo en calorías — helado de dieta o light (80-130 kcal/100g)"),
+    "moderado":    (180, "Moderado",    "🟡", "Calorías moderadas — helado artesanal estándar (130-180 kcal/100g)"),
+    "denso":       (240, "Calórico",    "🟠", "Alto en calorías — gelato cremoso o con mucha grasa (180-240 kcal/100g)"),
+    "muy_denso":   (999, "Muy calórico","🔴", "Muy alto en calorías — receta indulgente o con mucho azúcar/grasa (> 240 kcal/100g)"),
+}
+
+# ── Clasificación proteica ────────────────────────────────────────────────────
+PROTEIN_CLASSIFICATION = {
+    # (min_g, max_g, etiqueta, emoji, descripción)
+    "muy_bajo":       (0,    2.5,  "Proteína muy baja",  "⬇️",  "< 2.5 g/100g — sin aporte proteico significativo"),
+    "bajo":           (2.5,  5.0,  "Proteína baja",      "📊",  "2.5-5 g/100g — aporte modesto"),
+    "fuente":         (5.0,  10.0, "Fuente de proteína", "💪",  "5-10 g/100g — califica como 'fuente de proteína' (Codex)"),
+    "alto":           (10.0, 20.0, "Alto en proteína",   "🏋️", "10-20 g/100g — helado proteico"),
+    "muy_alto":       (20.0, 999,  "Muy alto proteína",  "⚡",  "> 20 g/100g — suplemento proteico"),
 }
