@@ -6,6 +6,14 @@ from constants import (
     DIAGS_EXCLUIR_TICKET,
 )
 
+# ── set_page_config DEBE ser el primer comando Streamlit ──────────────────────
+st.set_page_config(
+    page_title="Cepillao' Gelato Studio",
+    layout="wide",
+    page_icon="🍦"
+)
+
+# ── Base de datos e ingredientes ──────────────────────────────────────────────
 try:
     import database as db
     db.init_db()
@@ -23,13 +31,6 @@ def _load_ingredients():
 ingredients_raw  = _load_ingredients()
 ingredients_map  = {ing['name']: ing for ing in ingredients_raw}
 ingredient_names = list(ingredients_map.keys())
-
-# ── Configuración de página ────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Cepillao' Gelato Studio",
-    layout="wide",
-    page_icon="🍦"
-)
 
 st.markdown("""
 <style>
