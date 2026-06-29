@@ -987,38 +987,103 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
     # M_sacarosa = 342.3 g/mol (masa molar de referencia para normalizar PAC)
     # El PAC absoluto acumulado ya pondera todos los azúcares como "equivalentes sacarosa"
     # Precisión: ±0.3°C para mezclas artesanales. Ver Chen (1986) para modelo no lineal.
+    #
+    # IMPORTANTE — interpretación correcta del ΔT:
+    #   El ΔT es la temperatura de INICIO de congelación (primer cristal).
+    #   Un gelato bien formulado tiene un ΔT típico de −2°C a −4°C.
+    #   Esto es correcto y normal — la mezcla congela completamente a −18°C
+    #   porque la congelación es un proceso progresivo que continúa hasta
+    #   la temperatura del congelador.
+    #
+    #   El umbral antiguo (delta_t <= -18.0) era físicamente imposible para
+    #   cualquier helado normal sin alcohol masivo, generando falsos positivos
+    #   constantes. Fue reemplazado por umbrales físicamente calibrados (FIX-6).
+    #
+    # FIX-6: Umbrales de ΔT basados en física real (v2.2 junio 2026)
+    #   ΔT > −1.0°C  → CRÍTICO: base casi acuosa, cristales grandes, textura icy
+    #   −1.8 < ΔT ≤ −1.0°C → IMPORTANTE: puede quedar granuloso
+    #   −4.0 < ΔT ≤ −1.8°C → PERFECTO: zona ideal para Creami y mantecadora
+    #   −6.0 < ΔT ≤ −4.0°C → AJUSTABLE: exceso leve de PAC, puede quedar blando
+    #   ΔT ≤ −6.0°C → CRÍTICO exceso: muy blando post-proceso (generalmente alcohol)
+    #
+    #   Derivación del límite inferior −1.0°C:
+    #     Con ΔT > −1.0°C, la molalidad de solutos es < 0.54 mol/kg.
+    #     A esa concentración los cristales de hielo que se forman son
+    #     muy grandes (cinética de nucleación lenta) → textura inevitablemente icy.
+    #
+    #   Derivación del límite superior −6.0°C:
+    #     ΔT < −6°C solo ocurre con PAC muy elevado (alcohol, exceso de poliol).
+    #     A esa concentración el helado puede quedar parcialmente líquido a −18°C
+    #     porque la fracción no congelable es demasiado grande.
     M_sacarosa = 342.3
     k_f        = 1.86
     pac_moles  = totals.get('pac', 0) / M_sacarosa
     water_kg   = totals.get('water', 0) / 1000
     delta_t    = -k_f * (pac_moles / water_kg) if water_kg > 0 else 0
 
-    congela_ok = delta_t <= CREAMI_FREEZE_TEMP_C if is_creami else True
+    # Clasificación crioscópica por zona
+    if water_kg <= 0:
+        crio_zona = 'sin_agua'
+    elif delta_t > -1.0:
+        crio_zona = 'muy_bajo'       # base acuosa, icy inevitable
+    elif delta_t > -1.8:
+        crio_zona = 'bajo'           # granuloso probable
+    elif delta_t > -4.0:
+        crio_zona = 'optimo'         # zona ideal
+    elif delta_t > -6.0:
+        crio_zona = 'alto'           # exceso leve, blando
+    else:
+        crio_zona = 'muy_alto'       # exceso severo / alcohol
+
+    # congela_ok: True si el helado congela correctamente a -18°C
+    # Un ΔT entre -1.0 y -6.0 siempre congela — solo los extremos son problemáticos
+    congela_ok = crio_zona in ('bajo', 'optimo', 'alto')
 
     d['delta_t']         = round(delta_t, 2)
+    d['crio_zona']       = crio_zona
     d['congela_ok']      = congela_ok
     d['cryoscopy_model'] = 'Raoult simplificado (Kf=1.86, M_ref=342.3)'
     d['targets']         = targets
     # FIX-5: None si water=0 para evitar falso stw_bajo
     d['st_water_ratio']  = round(stw_v, 3) if stw_v is not None else None
 
-    if is_creami and not congela_ok:
-        temp_serv = (f"ΔT {delta_t:.2f}°C — insuficiente para −18°C "
-                     f"(mín {CREAMI_FREEZE_TEMP_C}°C)")
-    elif is_creami:
-        temp_serv = f"ΔT {delta_t:.2f}°C ✅ — congela correctamente a −18°C"
-    else:
-        temp_serv = f"ΔT {delta_t:.2f}°C"
-    d['temp_servicio'] = temp_serv
+    # Texto descriptivo para UI
+    _zona_labels = {
+        'sin_agua':  f"ΔT {delta_t:.2f}°C — sin agua libre, no calculable",
+        'muy_bajo':  f"ΔT {delta_t:.2f}°C ⚠️ — muy bajo, cristales grandes (textura icy)",
+        'bajo':      f"ΔT {delta_t:.2f}°C 🟡 — bajo, puede quedar granuloso",
+        'optimo':    f"ΔT {delta_t:.2f}°C ✅ — zona ideal (−1.8 a −4.0°C)",
+        'alto':      f"ΔT {delta_t:.2f}°C 🟡 — exceso leve de PAC, puede quedar blando",
+        'muy_alto':  f"ΔT {delta_t:.2f}°C 🔴 — exceso severo de PAC o alcohol",
+    }
+    d['temp_servicio'] = _zona_labels.get(crio_zona, f"ΔT {delta_t:.2f}°C")
 
     # ── CREAMI diagnósticos ───────────────────────────────────────────────────
     if is_creami:
-        diag(PRIORITY_CRITICAL, 'no_congela', not congela_ok,
-             f"ΔT {delta_t:.2f}°C — NO CONGELA a −18°C",
-             "PAC insuficiente para solidificar a la temperatura del congelador. "
-             "① Añade dextrosa (+20-30g). "
-             "② Sustituye parte de sacarosa por dextrosa o fructosa. "
-             "③ Reduce el agua libre.")
+        # FIX-6: diagnóstico 'muy_bajo' reemplaza al antiguo 'no_congela' (umbral -18°C)
+        diag(PRIORITY_CRITICAL, 'crio_muy_bajo', crio_zona == 'muy_bajo',
+             f"ΔT {delta_t:.2f}°C — base demasiado acuosa, textura icy inevitable",
+             "Con ΔT > −1.0°C hay muy pocos solutos para frenar el crecimiento de cristales. "
+             "El helado congela pero con cristales grandes → textura de granizado. "
+             "① Añade dextrosa 20–40g (PAC=1.9, efecto inmediato). "
+             "② Sustituye parte del agua/leche por leche en polvo. "
+             "③ Añade sacarosa o fructosa si el POD lo permite.")
+
+        diag(PRIORITY_IMPORTANT, 'crio_bajo', crio_zona == 'bajo',
+             f"ΔT {delta_t:.2f}°C — algo bajo, granuloso probable",
+             "La base congela bien pero puede quedar algo granulosa. "
+             "Añade 10–20g de dextrosa o ajusta la relación agua/sólidos.")
+
+        diag(PRIORITY_ADJUSTABLE, 'crio_alto', crio_zona == 'alto',
+             f"ΔT {delta_t:.2f}°C — exceso leve de PAC",
+             "Demasiados solutos → el helado puede quedar blando o difícil de procesar. "
+             "Reduce dextrosa o fructosa, o aumenta la proporción de trehalosa (PAC=0.70).")
+
+        diag(PRIORITY_CRITICAL, 'crio_muy_alto', crio_zona == 'muy_alto',
+             f"ΔT {delta_t:.2f}°C — exceso severo de PAC",
+             "El punto de congelación está demasiado deprimido. "
+             "A −18°C el helado puede quedar parcialmente blando. "
+             "Causa más común: alcohol >4%. Revisa licores o exceso de poliol.")
 
         diag(PRIORITY_IMPORTANT, 'agua_alta_creami', water_v > 70,
              f"Agua libre {water_v:.1f}% → muy alta para Creami",
@@ -1051,6 +1116,24 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
              "① Dextrosa monohidrato (PAC=1.9). "
              "② Fructosa (PAC=1.9). "
              "③ Azúcar invertido.")
+
+        # FIX-6: diagnósticos crioscópicos para mantecadora con mismos umbrales físicos
+        diag(PRIORITY_CRITICAL, 'crio_muy_bajo', crio_zona == 'muy_bajo',
+             f"ΔT {delta_t:.2f}°C — base acuosa, cristales grandes durante el mantecado",
+             "Con ΔT > −1.0°C el mantecado no puede generar cristales finos. "
+             "Añade dextrosa 20–40g o reduce agua libre.")
+
+        diag(PRIORITY_IMPORTANT, 'crio_bajo', crio_zona == 'bajo',
+             f"ΔT {delta_t:.2f}°C — algo bajo para mantecadora",
+             "Puede quedar granuloso. Añade 10–20g de dextrosa.")
+
+        diag(PRIORITY_ADJUSTABLE, 'crio_alto', crio_zona == 'alto',
+             f"ΔT {delta_t:.2f}°C — exceso leve de PAC",
+             "Puede quedar blando al servir. Reduce dextrosa/fructosa.")
+
+        diag(PRIORITY_CRITICAL, 'crio_muy_alto', crio_zona == 'muy_alto',
+             f"ΔT {delta_t:.2f}°C — exceso severo de PAC o alcohol",
+             "Helado muy blando. Revisa licores o exceso de poliol.")
 
     # ── RATIO ST/AGUA ─────────────────────────────────────────────────────────
     # FIX-5: solo dispara si stw_v es un número real (water_v > 0)
@@ -1269,7 +1352,7 @@ def format_production_ticket(recipe_name, product_type, machine,
         f"  Ratio ST/Agua:  {stw_str}   {stw_sym} (rango {stw_lo:.2f}–{stw_hi:.2f})\n"
         f"  POD:            {pct.get('pod_total', 0):.0f}      {sym('pod')}\n"
         f"  PAC:            {pct.get('pac_total', 0):.0f}      {sym('pac')}\n"
-        f"  ΔT crioscopía:  {derived.get('delta_t', 0):.2f} °C\n"
+        f"  ΔT crioscopía:  {derived.get('delta_t', 0):.2f} °C   {derived.get('temp_servicio', '').split('—')[0].split('✅')[0].split('⚠️')[0].split('🟡')[0].split('🔴')[0].strip()}\n"
         f"\nCALORÍAS / NUTRICIÓN:\n"
         f"{cal_block}"
         f"  Costo estimado: ${totals['cost']:.2f}\n"
