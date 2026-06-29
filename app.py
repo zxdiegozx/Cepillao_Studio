@@ -44,21 +44,87 @@ for b in _bases_as_ings:
     ingredients_map[b['name']] = b
 ingredient_names = sorted(ingredients_map.keys())
 
-# config_params: carga desde BD al iniciar sesión (vacío si falla o es primera vez)
+# ── REC 1: config_params cargado desde BD al iniciar sesión ──────────────────
 if "config_params" not in st.session_state:
     try:
         st.session_state.config_params = db.get_user_config()
     except Exception:
         st.session_state.config_params = {}
 
-# ── CSS personalizado (cargado desde archivo para separar estilos de lógica) ─
-try:
-    import pathlib
-    _css_path = pathlib.Path(__file__).parent / ".streamlit" / "custom.css"
-    _css = _css_path.read_text(encoding="utf-8")
+# ── REC 4: CSS desde archivo externo (con fallback inline si no existe) ───────
+import pathlib as _pathlib
+_css_file = _pathlib.Path(__file__).parent / ".streamlit" / "custom.css"
+if _css_file.exists():
+    _css = _css_file.read_text(encoding="utf-8")
     st.markdown(f"<style>{_css}</style>", unsafe_allow_html=True)
-except FileNotFoundError:
-    pass  # en deploy sin el archivo, la app funciona sin estilos extra
+else:
+    st.markdown("""
+<style>
+.main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+.gelato-card {
+    background: #1e1e2e; border: 1px solid #2d2d44;
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 12px;
+}
+.gelato-card-title {
+    font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #888; margin-bottom: 10px;
+}
+.param-bar-wrap { margin-bottom: 10px; }
+.param-bar-header {
+    display: flex; justify-content: space-between;
+    align-items: baseline; margin-bottom: 3px;
+}
+.param-label { font-size: 0.82rem; color: #ccc; }
+.param-value { font-size: 1.05rem; font-weight: 700; color: #fff; }
+.param-range { font-size: 0.72rem; color: #666; }
+.param-bar-bg {
+    background: #2d2d44; border-radius: 4px; height: 6px;
+    position: relative; overflow: visible;
+}
+.param-bar-range { position: absolute; height: 100%; background: #2a4a2a; border-radius: 4px; }
+.param-bar-fill  { position: absolute; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+.bar-ok    { background: #4ade80; }
+.bar-low   { background: #60a5fa; }
+.bar-high  { background: #f87171; }
+.bar-empty { background: #444; }
+.param-status-ok    { color: #4ade80; font-size: 0.75rem; }
+.param-status-low   { color: #60a5fa; font-size: 0.75rem; }
+.param-status-high  { color: #f87171; font-size: 0.75rem; }
+.param-status-empty { color: #666;    font-size: 0.75rem; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-ok      { background: #14532d; color: #4ade80; }
+.badge-warn    { background: #451a03; color: #fb923c; }
+.badge-danger  { background: #450a0a; color: #f87171; }
+.badge-info    { background: #1e3a5f; color: #60a5fa; }
+.diag-item { padding: 10px 14px; border-radius: 8px; margin-bottom: 6px; border-left: 3px solid; }
+.diag-critical   { background: #1f0a0a; border-color: #ef4444; }
+.diag-important  { background: #1f150a; border-color: #f97316; }
+.diag-adjustable { background: #0f1f2f; border-color: #3b82f6; }
+.diag-title { font-size: 0.85rem; font-weight: 600; color: #eee; }
+.diag-tip   { font-size: 0.78rem; color: #999; margin-top: 3px; }
+.ing-row-header {
+    display: grid; grid-template-columns: 3fr 1.5fr 1.5fr;
+    gap: 6px; font-size: 0.7rem; color: #666;
+    text-transform: uppercase; letter-spacing: 0.06em; padding: 0 4px; margin-bottom: 4px;
+}
+.pote-fill-wrap { background: #1e1e2e; border: 1px solid #2d2d44; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
+.pote-fill-label { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+.pote-fill-bar-bg { background: #2d2d44; border-radius: 6px; height: 10px; overflow: hidden; }
+.pote-fill-bar { height: 100%; border-radius: 6px; }
+.section-overline { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #555; margin-bottom: 8px; margin-top: 4px; }
+.comp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.comp-cell { background: #181828; border-radius: 8px; padding: 10px 12px; border: 1px solid #252540; }
+.comp-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; letter-spacing: 0.06em; }
+.comp-cell-val   { font-size: 1.15rem; font-weight: 700; color: #fff; margin: 2px 0; }
+.comp-cell-hint  { font-size: 0.68rem; }
+.kcal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.kcal-cell { background: #181828; border-radius: 8px; padding: 10px 12px; border: 1px solid #252540; text-align: center; }
+.kcal-cell-val   { font-size: 1.2rem; font-weight: 800; color: #fff; }
+.kcal-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; }
+div[data-testid="stMetricValue"] { font-size: 18px !important; font-weight: 700 !important; }
+div[data-testid="stSidebar"] { background: #111120; }
+</style>
+""", unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -124,15 +190,15 @@ def _param_bar(label, val, lo, hi, unit="%", scale_max=None):
 def _section(title):
     st.markdown(f'<div class="section-overline">{title}</div>', unsafe_allow_html=True)
 
-
 def _card_open():
     st.markdown('<div class="gelato-card">', unsafe_allow_html=True)
 
 def _card_close():
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 # ═════════════════════════════════════════════════════════════════════════════
-# HELPERS DEL FORMULADOR (nivel módulo — accesibles desde cualquier tab)
+# REC 2: HELPERS DEL FORMULADOR — nivel módulo
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _collect_lines():
@@ -147,8 +213,11 @@ def _collect_lines():
     return lines
 
 
-def _load_recipe_into_state(lines, recipe_id=None, recipe_name=""):
-    """Inyecta líneas de receta en session_state y fuerza rerun."""
+def _load_recipe_into_state(lines: list, recipe_id=None, recipe_name: str = "") -> None:
+    """
+    Inyecta líneas de receta en session_state.
+    REC 3: usa st.toast() que sobrevive al st.rerun() posterior.
+    """
     for key in list(st.session_state.keys()):
         if any(key.startswith(p) for p in ["ing_name_", "grams_", "price_", "_prev_ing_name_"]):
             del st.session_state[key]
@@ -159,7 +228,6 @@ def _load_recipe_into_state(lines, recipe_id=None, recipe_name=""):
         st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
     st.session_state["recipe_loaded_id"]   = recipe_id
     st.session_state["recipe_loaded_name"] = recipe_name
-    # REC 3: toast para confirmar sin depender del st.success que se pierde en rerun
     st.toast(f"✅ «{recipe_name}» cargada en el Formulador", icon="🍦")
 
 
@@ -174,6 +242,7 @@ def callback_clear_all():
     st.session_state.num_rows = 4
     st.session_state.pop("recipe_loaded_id", None)
     st.session_state.pop("recipe_loaded_name", None)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 — FORMULADOR
@@ -191,22 +260,22 @@ with tab_form:
         value=st.session_state.get("recipe_loaded_name", ""),
         placeholder="Ej: Choco Creami v3"
     )
-    
-    # Indicador visual de receta activa (persiste en sidebar durante la sesión)
+
+    # ── REC 5: Indicador visual de receta/base activa ─────────────────────────
     _loaded_name = st.session_state.get("recipe_loaded_name", "")
     _loaded_id   = st.session_state.get("recipe_loaded_id")
     if _loaded_name:
-        _tipo = "Receta" if _loaded_id else "Base"
+        _tipo_carga = "Receta" if _loaded_id else "Base"
         st.sidebar.markdown(
             f"""<div style="background:#0f2a0f;border:1px solid #2d4a2d;border-radius:8px;
             padding:8px 12px;margin:4px 0 8px;font-size:0.78rem;">
-            <span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.68rem;">
-            {_tipo} activa</span><br>
+            <span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;
+            font-size:0.68rem;">{_tipo_carga} activa</span><br>
             <span style="color:#4ade80;font-weight:600;">📂 {_loaded_name}</span>
             </div>""",
             unsafe_allow_html=True
         )
-        
+
     product_type = st.sidebar.selectbox("Tipo de Producto", PRODUCT_TYPES)
     machine      = st.sidebar.selectbox("Maquinaria", MACHINES, index=0)
     is_creami    = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
@@ -234,6 +303,8 @@ with tab_form:
 
     st.sidebar.divider()
 
+    # guardar_receta y guardar_como_base siguen dentro del tab
+    # porque capturan product_type y machine del sidebar local.
     def guardar_receta():
         nombre = recipe_name_input.strip()
         if not nombre:
@@ -275,21 +346,19 @@ with tab_form:
     st.sidebar.button("🧫 Guardar como Base", on_click=guardar_como_base, use_container_width=True)
     st.sidebar.button("🗑️ Limpiar todo",      on_click=callback_clear_all, use_container_width=True)
 
-    # ── Layout principal: izquierda ingredientes, derecha análisis ────────────
+    # ── Layout principal ──────────────────────────────────────────────────────
     col_ing, col_panel = st.columns([9, 11], gap="large")
 
     # ── Columna ingredientes ──────────────────────────────────────────────────
     with col_ing:
         st.markdown('<div class="section-overline">🧾 Ingredientes</div>', unsafe_allow_html=True)
-
-        # Cabecera de columnas
         st.markdown("""
         <div class="ing-row-header">
           <span>Ingrediente</span><span>Gramos</span><span>$/kg</span>
         </div>""", unsafe_allow_html=True)
 
-        lines_for_calculator     = []
-        active_ingredient_names  = []
+        lines_for_calculator    = []
+        active_ingredient_names = []
 
         for i in range(st.session_state.num_rows):
             c1, c2, c3 = st.columns([3, 1.5, 1.5])
@@ -315,9 +384,8 @@ with tab_form:
 
         st.button("＋ Agregar fila", on_click=callback_add_row, use_container_width=True)
 
-        # Mini resumen de masa bajo la tabla
         if lines_for_calculator:
-            masa_tot = sum(g for _, g, _ in lines_for_calculator)
+            masa_tot  = sum(g for _, g, _ in lines_for_calculator)
             costo_tot = sum((g / 1000) * p for _, g, p in lines_for_calculator)
             st.markdown(f"""
             <div style="display:flex;gap:16px;padding:10px 14px;background:#181828;
@@ -401,11 +469,11 @@ with tab_form:
             kcal_badge = ""
             if cal_class:
                 badge_colors = {
-                    "muy_ligero": ("badge-ok",   "#4ade80"),
-                    "ligero":     ("badge-ok",   "#4ade80"),
-                    "moderado":   ("badge-info",  "#60a5fa"),
-                    "denso":      ("badge-warn",  "#fb923c"),
-                    "muy_denso":  ("badge-danger","#f87171"),
+                    "muy_ligero": ("badge-ok",     "#4ade80"),
+                    "ligero":     ("badge-ok",     "#4ade80"),
+                    "moderado":   ("badge-info",   "#60a5fa"),
+                    "denso":      ("badge-warn",   "#fb923c"),
+                    "muy_denso":  ("badge-danger", "#f87171"),
                 }
                 bc, _ = badge_colors.get(cal_class['key'], ("badge-info", "#60a5fa"))
                 kcal_badge = f'<span class="badge {bc}">{cal_class["emoji"]} {cal_class["etiqueta"]}</span>'
@@ -434,7 +502,6 @@ with tab_form:
             # ── COMPOSICIÓN CON BARRAS ────────────────────────────────────────
             _section("🧬 Composición")
 
-            # Fila 1: ST, Grasa, Agua libre
             c1, c2, c3 = st.columns(3)
             with c1:
                 _param_bar("Sólidos Totales", pct.get('st_pct', 0),
@@ -455,7 +522,6 @@ with tab_form:
                   </div>
                 </div>""", unsafe_allow_html=True)
 
-            # Fila 2: MSNF, Azúcares, Ratio ST/Agua
             c1, c2, c3 = st.columns(3)
             with c1:
                 _param_bar("MSNF", pct.get('msnf_pct', 0),
@@ -468,7 +534,6 @@ with tab_form:
                 stw_lo, stw_hi = tg.get('st_water', (0.42, 0.78))
                 _param_bar("Ratio ST/Agua", stw, stw_lo, stw_hi, "", scale_max=1.2)
 
-            # Fila 3: POD, PAC
             c1, c2 = st.columns(2)
             with c1:
                 _param_bar("POD", pct.get('pod_total', 0),
@@ -477,57 +542,82 @@ with tab_form:
                 _param_bar("PAC", pct.get('pac_total', 0),
                            tg['pac'][0], tg['pac'][1], "", scale_max=400)
 
-            # ── CRIOSCOPÍA + Aw — fila horizontal ────────────────────────────
+            # ── CRIOSCOPÍA + Aw ───────────────────────────────────────────────
             _section("❄️ Crioscopía  ·  💧 Actividad de Agua")
             dt      = derived.get("delta_t", 0)
             aw_data = calc.calc_water_activity(totals)
 
-            crio_ok = derived.get("congela_ok", True)
-            crio_color  = "#4ade80" if crio_ok else "#f87171"
-            crio_icon   = "✓" if crio_ok else "✗"
-            crio_label  = "Congela a −18°C" if crio_ok else "No congela a −18°C"
+            crio_ok    = derived.get("congela_ok", True)
+            crio_color = "#4ade80" if crio_ok else "#f87171"
+            crio_icon  = "✓" if crio_ok else "✗"
+            crio_label = "Congela a −18°C" if crio_ok else "No congela a −18°C"
 
             aw_riesgo = aw_data['riesgo_micro']
-            aw_colors = {"bajo": "#4ade80", "medio": "#fb923c", "alto": "#f87171", "sin_datos": "#666"}
-            aw_color  = aw_colors.get(aw_riesgo, "#666")
+            aw_colors = {"bajo": "#4ade80", "medio": "#fb923c", "alto": "#f87171"}
+            aw_color  = aw_colors.get(aw_riesgo, "#888")
 
-            c1, c2 = st.columns(2)
-            c1.markdown(f"""
-            <div class="comp-cell">
-              <div class="comp-cell-label">ΔT Crioscópico</div>
-              <div class="comp-cell-val" style="color:{crio_color};">{dt:.2f}°C</div>
-              <div class="comp-cell-hint" style="color:{crio_color};">{crio_icon} {crio_label}</div>
-            </div>""", unsafe_allow_html=True)
-            c2.markdown(f"""
-            <div class="comp-cell">
-              <div class="comp-cell-label">Actividad de Agua (Aw)</div>
-              <div class="comp-cell-val" style="color:{aw_color};">{aw_data['aw']:.4f}</div>
-              <div class="comp-cell-hint" style="color:{aw_color};">
-                Riesgo micro: {aw_riesgo.capitalize()}
+            st.markdown(f"""
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+              <div class="comp-cell">
+                <div class="comp-cell-label">ΔT crioscópico</div>
+                <div class="comp-cell-val" style="color:{crio_color};">{dt:.2f}°C</div>
+              </div>
+              <div class="comp-cell">
+                <div class="comp-cell-label">Estado</div>
+                <div class="comp-cell-val" style="color:{crio_color};font-size:0.9rem;">{crio_icon} {crio_label}</div>
+              </div>
+              <div class="comp-cell">
+                <div class="comp-cell-label">Aw estimada</div>
+                <div class="comp-cell-val">{aw_data.get('aw', 0):.3f}</div>
+              </div>
+              <div class="comp-cell">
+                <div class="comp-cell-label">Riesgo micro</div>
+                <div class="comp-cell-val" style="color:{aw_color};font-size:0.85rem;">{aw_riesgo.upper()}</div>
               </div>
             </div>""", unsafe_allow_html=True)
 
-            with st.expander("Ver interpretación Aw"):
-                st.caption(aw_data['interpretacion'])
+            # ── DIAGNÓSTICOS ──────────────────────────────────────────────────
+            diags = derived.get("diagnostics", [])
+            if diags:
+                _section("🩺 Diagnósticos")
+                crits = [d for d in diags if d['priority'] == 'critical']
+                imps  = [d for d in diags if d['priority'] == 'important']
+                adjs  = [d for d in diags if d['priority'] == 'adjustable'
+                         and d.get('key') not in DIAGS_EXCLUIR_TICKET]
+
+                if not crits and not imps and not adjs:
+                    st.markdown('<div class="badge badge-ok">✓ Formulación dentro de rangos</div>',
+                                unsafe_allow_html=True)
+                else:
+                    for d in crits:
+                        with st.expander(f"🔴 {d['title']}"):
+                            st.markdown(f"<div style='color:#f87171;font-size:0.82rem;'>{d['tip']}</div>",
+                                        unsafe_allow_html=True)
+                    for d in imps:
+                        with st.expander(f"🟠 {d['title']}"):
+                            st.markdown(f"<div style='color:#fb923c;font-size:0.82rem;'>{d['tip']}</div>",
+                                        unsafe_allow_html=True)
+                    for d in adjs:
+                        with st.expander(f"🔵 {d['title']}"):
+                            st.markdown(f"<div style='color:#93c5fd;font-size:0.82rem;'>{d['tip']}</div>",
+                                        unsafe_allow_html=True)
 
             # ── OVERRUN ───────────────────────────────────────────────────────
-            _section("📐 Overrun")
+            _section("📐 Rendimiento / Overrun")
             or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
-
-            if is_creami:
-                cap_label = "24oz" if machine == MACHINE_CREAMI_DELUXE else "16oz"
+            if or_d.get('is_creami'):
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"""<div class="comp-cell">
-                  <div class="comp-cell-label">Potes base ({cap_label})</div>
-                  <div class="comp-cell-val">{or_d['potes_base']:.1f}</div>
+                  <div class="comp-cell-label">Potes base</div>
+                  <div class="comp-cell-val">{or_d['potes_completos']} + resto</div>
                 </div>""", unsafe_allow_html=True)
                 c2.markdown(f"""<div class="comp-cell">
-                  <div class="comp-cell-label">Overrun fijo</div>
-                  <div class="comp-cell-val">~{or_d['overrun_fijo_pct']}%</div>
-                </div>""", unsafe_allow_html=True)
-                c3.markdown(f"""<div class="comp-cell">
                   <div class="comp-cell-label">Masa final est.</div>
                   <div class="comp-cell-val">{or_d['masa_final_estimada_g']:.0f} g</div>
+                </div>""", unsafe_allow_html=True)
+                c3.markdown(f"""<div class="comp-cell">
+                  <div class="comp-cell-label">Volumen est.</div>
+                  <div class="comp-cell-val">{or_d['volumen_estimado_ml']:.0f} ml</div>
                 </div>""", unsafe_allow_html=True)
                 if or_d.get("masa_ultimo_pote_g", 0) > 10:
                     st.caption(f"🫙 Último pote: {or_d['masa_ultimo_pote_g']:.0f} g de base")
@@ -569,53 +659,53 @@ with tab_form:
                 ingredient_names=active_ingredient_names
             )
             if not stab_recs:
-                st.markdown("""<div style="padding:8px 12px;background:#0f1f0f;border-radius:8px;
-                    border:1px solid #1a3a1a;color:#4ade80;font-size:0.83rem;">
-                    ✓ Sin recomendaciones de estabilizante</div>""", unsafe_allow_html=True)
+                st.markdown("✅ Sistema de estabilización completo.")
             else:
                 for r in stab_recs:
-                    prio_color = "#ef4444" if r['priority'] == 'necesario' else \
-                                 "#f97316" if r['priority'] == 'recomendado' else "#3b82f6"
-                    with st.expander(f"● {r['stabilizer']} — {r['dose_g_per_kg']}"):
-                        st.markdown(f"**Dosis en receta:** {r['dose_g_recipe']}")
-                        st.markdown(f"<span style='color:#aaa;font-size:0.82rem;'>{r['reason']}</span>",
-                                    unsafe_allow_html=True)
-                        if r.get('warning'):
-                            st.warning(r['warning'])
-                        alts = r.get('alternativas', [])
-                        if alts:
-                            st.markdown("**Alternativas disponibles:**")
-                            for alt in alts:
-                                st.markdown(f"<div style='font-size:0.8rem;color:#999;padding:2px 0;'>{alt}</div>",
-                                            unsafe_allow_html=True)
+                    color = {"critical": "#f87171", "important": "#fb923c",
+                             "info": "#60a5fa"}.get(r.get('priority', 'info'), "#60a5fa")
+                    st.markdown(
+                        f"<div style='font-size:0.82rem;color:{color};margin-bottom:4px;'>"
+                        f"• {r['text']}</div>",
+                        unsafe_allow_html=True
+                    )
 
-            # ── DIAGNÓSTICOS ──────────────────────────────────────────────────
-            _section("🚨 Diagnósticos")
-            diags_visibles = [d for d in derived.get("diagnostics", [])
-                              if d["key"] not in DIAGS_EXCLUIR_TICKET]
+            # ── EDULCORANTES ──────────────────────────────────────────────────
+            sw_data = calc.analyze_sweeteners(lines_for_calculator)
+            if sw_data:
+                _section("🍬 Edulcorantes")
+                for sw in sw_data:
+                    if sw.get('warning'):
+                        st.markdown(
+                            f"<div style='font-size:0.8rem;color:#fb923c;'>{sw['warning']}</div>",
+                            unsafe_allow_html=True
+                        )
+                    st.markdown(
+                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:2px;'>"
+                        f"<b style='color:#fff;'>{sw['nombre']}</b> · "
+                        f"POD {sw['pod_contrib']:.0f} ({sw['pct_pod']:.0f}%) · "
+                        f"PAC {sw['pac_contrib']:.0f} ({sw['pct_pac']:.0f}%) · "
+                        f"{sw['efecto_sabor']}</div>",
+                        unsafe_allow_html=True
+                    )
 
-            if not diags_visibles:
-                st.markdown("""<div style="padding:10px 14px;background:#0f1f0f;border-radius:8px;
-                    border:1px solid #1a3a1a;color:#4ade80;font-size:0.85rem;font-weight:600;">
-                    🎉 Mezcla perfectamente balanceada — sin alertas</div>""", unsafe_allow_html=True)
-            else:
-                # Agrupar por prioridad
-                crits  = [d for d in diags_visibles if d["priority"] == "critical"]
-                imps   = [d for d in diags_visibles if d["priority"] == "important"]
-                adjs   = [d for d in diags_visibles if d["priority"] == "adjustable"]
-
-                for d in crits:
-                    with st.expander(f"🔴 {d['title']}"):
-                        st.markdown(f"<div style='color:#f87171;font-size:0.82rem;'>{d['tip']}</div>",
-                                    unsafe_allow_html=True)
-                for d in imps:
-                    with st.expander(f"🟠 {d['title']}"):
-                        st.markdown(f"<div style='color:#fb923c;font-size:0.82rem;'>{d['tip']}</div>",
-                                    unsafe_allow_html=True)
-                for d in adjs:
-                    with st.expander(f"🔵 {d['title']}"):
-                        st.markdown(f"<div style='color:#93c5fd;font-size:0.82rem;'>{d['tip']}</div>",
-                                    unsafe_allow_html=True)
+            # ── PROTEÍNAS ─────────────────────────────────────────────────────
+            prot_data = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
+            if prot_data and prot_data.get('fuentes'):
+                _section("💪 Proteínas")
+                for f in prot_data['fuentes']:
+                    st.markdown(
+                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:2px;'>"
+                        f"<b style='color:#fff;'>{f['nombre']}</b> · "
+                        f"{f.get('proteina_g', 0):.1f} g proteína</div>",
+                        unsafe_allow_html=True
+                    )
+                if prot_data.get('sugerencias'):
+                    for s in prot_data['sugerencias']:
+                        st.markdown(
+                            f"<div style='font-size:0.78rem;color:#60a5fa;'>{s['text']}</div>",
+                            unsafe_allow_html=True
+                        )
 
             # ── EXPORTAR ──────────────────────────────────────────────────────
             st.divider()
@@ -667,6 +757,7 @@ with tab_recetas:
                     if rec.get("notes"):
                         st.write(f"**Notas:** {rec['notes']}")
                 with col_actions:
+                    # REC 3: carga simplificada — elimina 12 líneas de código duplicado
                     if st.button("📂 Cargar", key=f"load_{rec['id']}", use_container_width=True):
                         full = db.get_recipe(rec["id"])
                         if full:
@@ -725,12 +816,9 @@ with tab_bases:
                     for line in lines:
                         st.write(f"  · {line['ingredient_name']}: {float(line['grams']):.1f} g")
                 col_a, col_b, col_c = st.columns(3)
+                # REC 3: carga simplificada
                 if col_a.button("📂 Cargar", key=f"loadbase_{base['id']}", use_container_width=True):
-                    _load_recipe_into_state(
-                        lines,
-                        recipe_id=None,
-                        recipe_name=base["name"]
-                    )
+                    _load_recipe_into_state(lines, recipe_id=None, recipe_name=base["name"])
                     st.rerun()
                 if col_b.button("📋 Duplicar", key=f"dupbase_{base['id']}", use_container_width=True):
                     db.save_recipe({"name": f"{base['name']} (copia)", "product_type": base["product_type"],
@@ -862,7 +950,8 @@ with tab_ingredientes:
 with tab_config:
     st.subheader("⚙️ Configuración de Parámetros")
     st.markdown("Ajusta los **rangos objetivo** por tipo de producto y máquina. "
-                "Útil para calibrar según tus catas. Los cambios se aplican inmediatamente.")
+                "Útil para calibrar según tus catas. Los cambios se aplican inmediatamente "
+                "**y se guardan en la base de datos** (persisten entre sesiones).")
 
     cfg_product = st.selectbox("Tipo de producto", PRODUCT_TYPES, key="cfg_product")
     cfg_machine = st.selectbox("Máquina",          MACHINES,      key="cfg_machine")
@@ -872,6 +961,15 @@ with tab_config:
 
     def cfg_val(k, idx):
         return saved_cfg.get(k, defaults[k])[idx] if k in defaults else 0.0
+
+    # Indicador visual de config personalizada activa
+    if saved_cfg:
+        st.markdown(
+            f'<div class="badge badge-info">⚙️ Config personalizada activa para '
+            f'{cfg_product} · {cfg_machine}</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown("")
 
     st.write(f"#### Rangos para: **{cfg_product}** · **{cfg_machine}**")
 
@@ -886,8 +984,8 @@ with tab_config:
         msnf_lo= c1.number_input("MSNF mín %",  0.0, 20.0, float(cfg_val('msnf', 0)), step=0.5)
         msnf_hi= c2.number_input("MSNF máx %",  0.0, 20.0, float(cfg_val('msnf', 1)), step=0.5)
         c1, c2 = st.columns(2)
-        sug_lo = c1.number_input("Azúcares mín %",0.0, 40.0, float(cfg_val('sugars', 0)), step=0.5)
-        sug_hi = c2.number_input("Azúcares máx %",0.0, 40.0, float(cfg_val('sugars', 1)), step=0.5)
+        sug_lo = c1.number_input("Azúcares mín %", 0.0, 40.0, float(cfg_val('sugars', 0)), step=0.5)
+        sug_hi = c2.number_input("Azúcares máx %", 0.0, 40.0, float(cfg_val('sugars', 1)), step=0.5)
         c1, c2 = st.columns(2)
         pod_lo = c1.number_input("POD mín",     0.0, 300.0, float(cfg_val('pod', 0)), step=5.0)
         pod_hi = c2.number_input("POD máx",     0.0, 300.0, float(cfg_val('pod', 1)), step=5.0)
@@ -901,34 +999,27 @@ with tab_config:
         cs, cr = st.columns(2)
         if cs.form_submit_button("💾 Guardar", use_container_width=True):
             nueva_cfg = {
-                'st': (st_lo, st_hi), 'fat': (fat_lo, fat_hi),
-                'msnf': (msnf_lo, msnf_hi), 'sugars': (sug_lo, sug_hi),
-                'pod': (pod_lo, pod_hi), 'pac': (pac_lo, pac_hi),
-                'st_water': (stw_lo, stw_hi),
+                'st':       (st_lo,   st_hi),
+                'fat':      (fat_lo,  fat_hi),
+                'msnf':     (msnf_lo, msnf_hi),
+                'sugars':   (sug_lo,  sug_hi),
+                'pod':      (pod_lo,  pod_hi),
+                'pac':      (pac_lo,  pac_hi),
+                'st_water': (stw_lo,  stw_hi),
             }
+            # REC 1: guardar en session_state Y persistir en BD
             st.session_state.config_params[cfg_key] = nueva_cfg
             try:
                 db.set_user_config(cfg_key, nueva_cfg)
-                st.success(f"✅ Guardado para {cfg_product} · {cfg_machine} (persistido en BD)")
+                st.success(f"✅ Guardado para {cfg_product} · {cfg_machine} — persistido en BD")
             except Exception as e:
                 st.warning(f"⚠️ Guardado en sesión, pero falló BD: {e}")
+
         if cr.form_submit_button("🔄 Restaurar defaults", use_container_width=True):
             if cfg_key in st.session_state.config_params:
                 del st.session_state.config_params[cfg_key]
             try:
                 db.delete_user_config(cfg_key)
-                st.success("✅ Defaults restaurados (borrado de BD)")
+                st.success("✅ Defaults restaurados y eliminados de BD")
             except Exception:
                 st.success("✅ Defaults restaurados")
-            st.rerun()
-
-    if st.session_state.config_params:
-        st.divider()
-        st.write("#### Personalizaciones activas")
-        for key, vals in st.session_state.config_params.items():
-            prod, mach = key.split("_", 1)
-            st.caption(f"**{prod} · {mach}:** ST {vals['st'][0]}-{vals['st'][1]}% | "
-                       f"Grasa {vals['fat'][0]}-{vals['fat'][1]}% | "
-                       f"POD {vals['pod'][0]}-{vals['pod'][1]} | PAC {vals['pac'][0]}-{vals['pac'][1]}")
-    else:
-        st.caption("Sin personalizaciones — usando parámetros científicos por defecto.")
