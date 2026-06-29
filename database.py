@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     description TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_config (
+    key        TEXT PRIMARY KEY NOT NULL,
+    value      TEXT NOT NULL DEFAULT '{}',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 MIGRATIONS = [
@@ -72,6 +78,12 @@ MIGRATIONS = [
     # Para añadir más ingredientes en el futuro: agrega a DB_DATA y crea migración 6, 7...
     (5, "SELECT 1",
         "Seed incremental v1: 134 ingredientes estándar con categorias nuevas"),
+    (6, """CREATE TABLE IF NOT EXISTS user_config (
+        key        TEXT PRIMARY KEY NOT NULL,
+        value      TEXT NOT NULL DEFAULT '{}',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""",
+    "Tabla user_config para persistir rangos personalizados por tipo/máquina")
 ]
 
 # Versión de migración que dispara el seed incremental.
@@ -668,3 +680,58 @@ if __name__ == "__main__":
     print(f"Ingredientes: {len(ings)}")
     bases = get_all_recipes(bases_only=True)
     print(f"Bases de helado: {len(bases)}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIGURACIÓN DE USUARIO
+# Persiste los rangos objetivo personalizados (config_params en session_state)
+# en SQLite para que sobrevivan reinicios de Railway y cierres de navegador.
+# key   = "{product_type}_{machine}"  ej: "Helado/Gelato_Ninja Creami Deluxe"
+# value = JSON string del dict de rangos  ej: '{"st": [28, 38], "fat": [4, 15], ...}'
+# ─────────────────────────────────────────────────────────────────────────────
+
+import json as _json
+
+def get_user_config() -> dict:
+    """Carga toda la configuración guardada. Retorna dict {key: dict_de_rangos}."""
+    try:
+        conn = get_connection()
+        rows = conn.execute("SELECT key, value FROM user_config").fetchall()
+        conn.close()
+        result = {}
+        for row in rows:
+            try:
+                result[row["key"]] = _json.loads(row["value"])
+            except Exception:
+                pass  # fila corrupta → ignorar
+        return result
+    except Exception:
+        return {}
+
+
+def set_user_config(key: str, value: dict) -> None:
+    """Guarda o actualiza un rango personalizado para la combinación tipo/máquina."""
+    try:
+        conn = get_connection()
+        conn.execute(
+            """INSERT INTO user_config (key, value, updated_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(key) DO UPDATE SET
+                 value      = excluded.value,
+                 updated_at = CURRENT_TIMESTAMP""",
+            (key, _json.dumps(value))
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def delete_user_config(key: str) -> None:
+    """Elimina la config personalizada de una combinación tipo/máquina."""
+    try:
+        conn = get_connection()
+        conn.execute("DELETE FROM user_config WHERE key=?", (key,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
