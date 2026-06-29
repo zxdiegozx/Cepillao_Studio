@@ -67,7 +67,16 @@ MIGRATIONS = [
         "Añade flag zero_calorie a ingredientes"),
     (4, "ALTER TABLE recipes ADD COLUMN is_base INTEGER DEFAULT 0",
         "Añade flag is_base para distinguir bases de helado de recetas finales"),
+    # Migración 5: seed incremental.
+    # INSERT OR IGNORE respeta el UNIQUE en 'name': si ya existe, no toca nada.
+    # Para añadir más ingredientes en el futuro: agrega a DB_DATA y crea migración 6, 7...
+    (5, "SELECT 1",
+        "Seed incremental v1: 134 ingredientes estándar con categorias nuevas"),
 ]
+
+# Versión de migración que dispara el seed incremental.
+# Sube este número (y crea la migración correspondiente) cada vez que amplíes DB_DATA.
+_SEED_MIGRATION_VERSION = 5
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BASE DE DATOS ESTÁNDAR
@@ -437,8 +446,15 @@ def init_db():
                 )
                 conn.commit()
 
-    count = conn.execute("SELECT COUNT(*) FROM ingredients").fetchone()[0]
-    if count == 0:
+    # ── Seed incremental ─────────────────────────────────────────────────────
+    # Se ejecuta siempre que la migración _SEED_MIGRATION_VERSION esté aplicada.
+    # INSERT OR IGNORE: inserta solo ingredientes cuyo nombre no exista todavía.
+    # Esto garantiza que los nuevos ingredientes del DB_DATA llegan a bases de datos
+    # existentes (ya con datos), sin tocar ningún ingrediente personalizado del usuario.
+    seed_applied = _SEED_MIGRATION_VERSION in {
+        row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    if seed_applied:
         conn.executemany(
             "INSERT OR IGNORE INTO ingredients "
             "(name,category,fat,msnf,sugars,other_st,pod,pac,water,notes,function,brix,ph) "
