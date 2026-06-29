@@ -9,7 +9,7 @@ PACOJET_CAPACITY_ML        = 500   # ml, beaker estándar
 
 # ── Constantes calóricas ──────────────────────────────────────────────────────
 KCAL_FAT     = 9.0
-KCAL_PROTEIN = 3.5    # 35% del MSNF estimado como proteína
+KCAL_PROTEIN = 3.5    # ~35% del MSNF estimado como proteína
 KCAL_SUGAR   = 4.0
 KCAL_OTHER   = 2.5    # fibra / almidón / cacao: promedio
 KCAL_ALCOHOL = 7.0
@@ -20,21 +20,22 @@ CREAMI_FREEZE_HOURS_MIN = 24
 CREAMI_DELTA_T_MIN      = -1.5    # ΔT mínimo para congelar a -18 °C
 
 # ── Perfiles organolépticos de edulcorantes ───────────────────────────────────
+# FIX B1: eliminada la clave duplicada 'azucar invertido' (POD correcto = 1.30)
+# Estructura: (POD, PAC, kcal/g, descripción_sabor, perfil_dulzor)
 SWEETENER_PROFILES = {
     'sacarosa':         (1.00, 1.00, 4.0, 'Referencia — dulzor limpio y redondo',        'inmediato'),
     'dextrosa':         (0.75, 1.90, 4.0, 'Frescor suave positivo en boca fría',         'inmediato'),
     'fructosa':         (1.20, 1.90, 4.0, 'Muy dulce en frío, puede ser empalagoso',     'inmediato'),
     'trehalosa':        (0.45, 0.70, 4.0, 'Muy suave, casi neutro, crioprotector',       'lento'),
     'alulosa':          (0.70, 1.00, 0.4, 'El más parecido al azúcar, sin retrogusto',   'inmediato'),
-    'eritritol':        (0.65, 1.30, 0.2, 'Efecto frescor/mentolado — limitar a 1.5 %',  'inmediato'),
+    'eritritol':        (0.65, 1.30, 0.2, 'Efecto frescor/mentolado — limitar a 1.5%',  'inmediato'),
     'maltitol':         (0.75, 0.90, 2.4, 'Similar a sacarosa, posibles molestias GI',   'inmediato'),
     'isomalt':          (0.45, 0.50, 2.0, 'Neutro, antirecristalizante',                 'lento'),
-    'azucar invertido': (1.25, 1.90, 4.0, 'Muy antirecristalizante, frescor agradable',  'inmediato'),
+    'azucar invertido': (1.30, 1.90, 4.0, 'Muy antirecristalizante, frescor agradable',  'inmediato'),
     'stevia':           (0.00, 0.00, 0.0, 'Retrogusto amargo/regaliz — máx 0.3 g/kg',   'tardío'),
     'splenda':          (0.00, 0.00, 0.0, 'Stevia + eritritol — ver ambos perfiles',     'tardío'),
     'glucosa de40':     (0.50, 0.80, 4.0, 'Antirecristalizante suave, neutro',           'inmediato'),
     'glucosa de60':     (0.70, 0.90, 4.0, 'Mayor dulzor que DE40, neutro',               'inmediato'),
-    'azucar invertido': (1.30, 1.90, 4.0, 'Muy antirecristalizante, frescor agradable',  'inmediato'),
 }
 
 
@@ -72,7 +73,6 @@ def calc_totals(lines_with_ings):
         for k in totals:
             if k != 'cost':
                 totals[k] += c.get(k, 0)
-        # G1 fix: guard NaN cuando price_per_kg es None o vacío
         try:
             price = float(price_per_kg) if price_per_kg not in (None, '', 'None') else 0.0
         except (ValueError, TypeError):
@@ -111,7 +111,7 @@ def calc_calories(totals):
     if m <= 0:
         return {'kcal_total': 0, 'kcal_per_100g': 0, 'kcal_per_pote_deluxe': 0}
 
-    protein_g = totals.get('msnf', 0) * 0.35   # ~35 % del MSNF es proteína
+    protein_g = totals.get('msnf', 0) * 0.35   # ~35% del MSNF es proteína
 
     kcal = (
         totals.get('fat', 0)      * KCAL_FAT      +
@@ -124,10 +124,104 @@ def calc_calories(totals):
     kcal_per_pote = kcal_per_100g * CREAMI_DELUXE_CAPACITY_G / 100
 
     return {
-        'kcal_total':          round(kcal, 0),
-        'kcal_per_100g':       round(kcal_per_100g, 0),
+        'kcal_total':           round(kcal, 0),
+        'kcal_per_100g':        round(kcal_per_100g, 0),
         'kcal_per_pote_deluxe': round(kcal_per_pote, 0),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FUNCIONES AUXILIARES — exportadas (FIX B2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_targets(product_type: str, machine: str) -> dict:
+    """
+    Retorna rangos objetivo para un tipo de producto y máquina.
+    Todos los rangos son (lo, hi). PAC Pacojet tiene lo=None (sin mínimo).
+    Incluye msnf_critical: umbral de arenado diferenciado por máquina.
+    """
+    is_sorbet = 'Sorbete' in product_type or 'Granita' in product_type
+    is_vegan  = 'Vegano'  in product_type
+    is_frozen = 'Frozen'  in product_type
+    is_light  = 'Ligero'  in product_type
+    is_creami = 'Ninja Creami' in machine
+    is_paco   = 'Pacojet' in machine
+
+    if is_creami:
+        if is_sorbet:
+            st = (25, 33); fat = (0, 2);  msnf = (0, 1)
+        elif is_frozen:
+            st = (28, 36); fat = (2, 8);  msnf = (3, 9)
+        elif is_vegan:
+            st = (28, 38); fat = (2, 15); msnf = (0, 2)
+        elif is_light:
+            st = (26, 34); fat = (2, 6);  msnf = (8, 12)
+        else:
+            st = (28, 38); fat = (4, 15); msnf = (5, 10)
+        sugars        = (13, 22)
+        pod           = (115, 175) if is_sorbet else (125, 200)
+        pac           = (120, 260)
+        st_water      = (0.42, 0.78)
+        msnf_critical = 11.0
+
+    elif is_paco:
+        if is_sorbet:
+            st = (27, 35); fat = (0, 2);  msnf = (0, 2)
+        elif is_vegan:
+            st = (34, 42); fat = (2, 18); msnf = (0, 2)
+        elif is_frozen:
+            st = (30, 38); fat = (2, 10); msnf = (4, 10)
+        elif is_light:
+            st = (30, 38); fat = (2, 6);  msnf = (8, 13)
+        else:
+            st = (34, 42); fat = (4, 20); msnf = (6, 11)
+        sugars        = (13, 24)
+        pod           = (115, 180) if is_sorbet else (130, 210)
+        pac           = (None, 420)   # solo límite superior
+        st_water      = (0.50, 0.78)
+        msnf_critical = 12.5
+
+    else:  # Mantecadora Tradicional y otras
+        if is_sorbet:
+            st = (27, 35); fat = (0, 2);  msnf = (0, 2)
+        elif is_vegan:
+            st = (34, 42); fat = (2, 18); msnf = (0, 2)
+        elif is_frozen:
+            st = (30, 38); fat = (2, 10); msnf = (4, 10)
+        elif is_light:
+            st = (30, 38); fat = (2, 6);  msnf = (8, 12)
+        else:
+            st = (34, 42); fat = (4, 20); msnf = (6, 11)
+        sugars        = (13, 24)
+        pod           = (115, 180) if is_sorbet else (130, 210)
+        pac           = (150, 320)
+        st_water      = (0.48, 0.78)
+        msnf_critical = 11.5
+
+    return {
+        'st':            st,
+        'fat':           fat,
+        'msnf':          msnf,
+        'sugars':        sugars,
+        'pod':           pod,
+        'pac':           pac,
+        'st_water':      st_water,
+        'msnf_critical': msnf_critical,
+    }
+
+
+def _status(val: float, lo, hi) -> str:
+    """
+    Semáforo de rango: 'empty' | 'low' | 'ok' | 'high'.
+    lo y/o hi pueden ser None para rangos unilaterales (ej. PAC Pacojet).
+    """
+    if val <= 0:
+        return 'empty'
+    if lo is not None and val < lo:
+        return 'low'
+    if hi is not None and val > hi:
+        return 'high'
+    return 'ok'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,147 +229,48 @@ def calc_calories(totals):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Creami Deluxe'):
-    """Ratios, crioscopía, diagnósticos."""
+    """Ratios, crioscopía, semáforo y diagnósticos."""
     d = {}
     m = totals['grams']
     if m <= 0:
         return d
 
-    # Ratios
+    is_sorbet = 'Sorbete' in product_type or 'Granita' in product_type
+    is_vegan  = 'Vegano'  in product_type
+    is_creami = 'Ninja Creami' in machine
+    is_paco   = 'Pacojet' in machine
+
+    # ── Ratios ────────────────────────────────────────────────────────────────
     d['ratio_fat_msnf']    = totals['fat']    / totals['msnf']  if totals['msnf']  > 0 else 0
     d['ratio_sugars_st']   = totals['sugars'] / totals['st']    if totals['st']    > 0 else 0
     d['ratio_st_water']    = totals['st']     / totals['water'] if totals['water'] > 0 else 0
     d['ratio_sugar_water'] = totals['sugars'] / totals['water'] if totals['water'] > 0 else 0
 
-    # Crioscopía estimada (modelo lineal Raoult simplificado)
-    pac       = totals['pac']
-    water_kg  = totals['water'] / 1000
-    d['delta_t'] = -pac * 0.2746 * water_kg if water_kg > 0 else 0
+    # ── Crioscopía (Raoult lineal simplificado) ───────────────────────────────
+    water_kg     = totals['water'] / 1000
+    d['delta_t'] = -totals['pac'] * 0.2746 * water_kg if water_kg > 0 else 0
 
-    # Flags de tipo de producto y máquina
-    is_sorbet  = 'Sorbete' in product_type or 'Granita' in product_type
-    is_vegan   = 'Vegano'  in product_type
-    is_frozen  = 'Frozen'  in product_type
-    is_creami  = 'Ninja Creami' in machine
-    is_paco    = 'Pacojet' in machine
-
-    # ── Rangos objetivo según máquina y tipo de producto ──────────────────────
+    # ── Temperatura de servicio ───────────────────────────────────────────────
     if is_creami:
-        # Ninja Creami Deluxe / Standard — -18 °C, 640 g, overrun 40-60 %
-        if is_sorbet:
-            st_lo, st_hi     = 25, 33
-            fat_lo, fat_hi   = 0,  2
-            msnf_lo, msnf_hi = 0,  1
-        elif is_frozen:
-            st_lo, st_hi     = 28, 36
-            fat_lo, fat_hi   = 2,  8
-            msnf_lo, msnf_hi = 3,  9
-        elif is_vegan:
-            st_lo, st_hi     = 28, 38
-            fat_lo, fat_hi   = 2, 15
-            msnf_lo, msnf_hi = 0,  2
-        else:
-            st_lo, st_hi     = 28, 38
-            fat_lo, fat_hi   = 4, 15
-            msnf_lo, msnf_hi = 5, 10
-        sug_lo, sug_hi       = 13, 22
-        pod_lo = 115 if is_sorbet else 125
-        pod_hi = 175 if is_sorbet else 200
-        pac_lo = 120           # mínimo real a -18 °C
-        pac_hi = 260
-        st_water_lo = 0.42
-        st_water_hi = 0.78
-
-        # Temperatura Creami
-        d['temp_objetivo']  = CREAMI_FREEZE_TEMP_C
-        d['congela_ok']     = d['delta_t'] < CREAMI_DELTA_T_MIN
-        d['temp_servicio']  = f"Congelar {CREAMI_FREEZE_HOURS_MIN}h a {CREAMI_FREEZE_TEMP_C}°C → procesar"
-
+        d['temp_objetivo'] = CREAMI_FREEZE_TEMP_C
+        d['congela_ok']    = d['delta_t'] < CREAMI_DELTA_T_MIN
+        d['temp_servicio'] = f"Congelar {CREAMI_FREEZE_HOURS_MIN}h a {CREAMI_FREEZE_TEMP_C}°C → procesar"
     elif is_paco:
-        # Pacojet — rangos originales
-        if is_sorbet:
-            st_lo, st_hi     = 27, 35
-            fat_lo, fat_hi   = 0,  2
-            msnf_lo, msnf_hi = 0,  2
-        elif is_vegan:
-            st_lo, st_hi     = 34, 42
-            fat_lo, fat_hi   = 2, 18
-            msnf_lo, msnf_hi = 0,  2
-        elif is_frozen:
-            st_lo, st_hi     = 30, 38
-            fat_lo, fat_hi   = 2, 10
-            msnf_lo, msnf_hi = 4, 10
-        else:
-            st_lo, st_hi     = 34, 42
-            fat_lo, fat_hi   = 4, 20
-            msnf_lo, msnf_hi = 6, 11
-        sug_lo, sug_hi       = 13, 24
-        pod_lo = 115 if is_sorbet else 130
-        pod_hi = 180 if is_sorbet else 210
-        pac_lo = 200
-        pac_hi = 420
-        st_water_lo = 0.50
-        st_water_hi = 0.78
-        d['temp_servicio']  = "Pacotizar a -22°C → servir"
-
+        d['temp_servicio'] = "Pacotizar a -22°C → servir"
     else:
-        # Mantecadora tradicional y otras
-        if is_sorbet:
-            st_lo, st_hi     = 27, 35
-            fat_lo, fat_hi   = 0,  2
-            msnf_lo, msnf_hi = 0,  2
-        elif is_vegan:
-            st_lo, st_hi     = 34, 42
-            fat_lo, fat_hi   = 2, 18
-            msnf_lo, msnf_hi = 0,  2
-        elif is_frozen:
-            st_lo, st_hi     = 30, 38
-            fat_lo, fat_hi   = 2, 10
-            msnf_lo, msnf_hi = 4, 10
-        else:
-            st_lo, st_hi     = 34, 42
-            fat_lo, fat_hi   = 4, 20
-            msnf_lo, msnf_hi = 6, 11
-        sug_lo, sug_hi       = 13, 24
-        pod_lo = 115 if is_sorbet else 130
-        pod_hi = 180 if is_sorbet else 210
-        pac_lo = 150
-        pac_hi = 320
-        st_water_lo = 0.48
-        st_water_hi = 0.78
-        d['temp_servicio']  = "-12 a -14 °C"
+        d['temp_servicio'] = "-12 a -14 °C"
 
-    d['targets'] = dict(
-        st=(st_lo, st_hi), fat=(fat_lo, fat_hi),
-        msnf=(msnf_lo, msnf_hi), sugars=(sug_lo, sug_hi),
-        pod=(pod_lo, pod_hi), pac=(pac_lo, pac_hi),
-        st_water=(st_water_lo, st_water_hi),
-    )
+    # ── Rangos objetivo (FIX B2: via _get_targets exportada) ─────────────────
+    tgt = _get_targets(product_type, machine)
+    d['targets'] = tgt
 
-    # ── Semáforo ──────────────────────────────────────────────────────────────
-    def status(val, lo, hi):
-        if val <= 0: return 'empty'
-        if val < lo: return 'low'
-        if val > hi: return 'high'
-        return 'ok'
-
-    d['status'] = {
-        'st':       status(pct.get('st_pct',    0), st_lo,       st_hi),
-        'fat':      status(pct.get('fat_pct',   0), fat_lo,      fat_hi),
-        'msnf':     status(pct.get('msnf_pct',  0), msnf_lo,     msnf_hi),
-        'sugars':   status(pct.get('sugars_pct',0), sug_lo,      sug_hi),
-        'pod':      status(pct.get('pod_total', 0), pod_lo,      pod_hi),
-        'pac':      status(pct.get('pac_total', 0), pac_lo,      pac_hi),
-        'st_water': status(d['ratio_st_water'],     st_water_lo, st_water_hi),
-        'water':    status(pct.get('water_pct', 0), 50,          72),
-    }
-
-    # ── Diagnósticos ──────────────────────────────────────────────────────────
-    diags = []
-
-    def diag(priority, key, condition, title, tip):
-        if condition:
-            diags.append({'priority': priority, 'key': key, 'title': title, 'tip': tip})
+    st_lo,  st_hi  = tgt['st']
+    fat_lo, fat_hi = tgt['fat']
+    sug_lo, sug_hi = tgt['sugars']
+    pac_lo, pac_hi = tgt['pac']
+    pod_lo, pod_hi = tgt['pod']
+    stw_lo, stw_hi = tgt['st_water']
+    msnf_crit      = tgt['msnf_critical']
 
     st_v   = pct.get('st_pct',    0)
     fat_v  = pct.get('fat_pct',   0)
@@ -286,14 +281,33 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
     stw_v  = d['ratio_st_water']
     wat_v  = pct.get('water_pct', 0)
 
-    # ── DIAGNÓSTICOS NINJA CREAMI ─────────────────────────────────────────────
+    # ── Semáforo (FIX B2: via _status exportada, soporta lo=None) ────────────
+    d['status'] = {
+        'st':       _status(st_v,   st_lo,           st_hi),
+        'fat':      _status(fat_v,  fat_lo,          fat_hi),
+        'msnf':     _status(msnf_v, *tgt['msnf']),
+        'sugars':   _status(sug_v,  sug_lo,          sug_hi),
+        'pod':      _status(pod_v,  pod_lo,          pod_hi),
+        'pac':      _status(pac_v,  pac_lo,          pac_hi),
+        'st_water': _status(stw_v,  stw_lo,          stw_hi),
+        'water':    _status(wat_v,  50,              72),
+    }
+
+    # ── Diagnósticos ──────────────────────────────────────────────────────────
+    diags = []
+
+    def diag(priority, key, condition, title, tip):
+        if condition:
+            diags.append({'priority': priority, 'key': key, 'title': title, 'tip': tip})
+
+    # ── NINJA CREAMI ──────────────────────────────────────────────────────────
     if is_creami:
         diag('critical', 'st_creami_high', st_v > 40,
              f"ST {st_v:.1f}% → BLOQUE DURO para Ninja Creami",
-             "ST >40 % produce bloque que la Creami no puede procesar. "
+             "ST >40% produce bloque que la Creami no puede procesar. "
              "Síntoma: motor forzado, necesitas respin con leche. "
              "Reduce leche en polvo o añade 30-50 g más de leche líquida. "
-             "Objetivo para Creami: 28-38 % ST.")
+             "Objetivo para Creami: 28-38% ST.")
 
         diag('critical', 'pac_creami_low', 0 < pac_v < 100,
              f"PAC {pac_v:.0f} → NO CONGELA a −18 °C",
@@ -302,7 +316,7 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
 
         diag('important', 'st_creami_warn', 38 < st_v <= 40,
              f"ST {st_v:.1f}% → puede necesitar respin en Creami",
-             "Con ST entre 38-40 % el bloque puede quedar duro. "
+             "Con ST entre 38-40% el bloque puede quedar duro. "
              "Deja templar 3-5 minutos antes de procesar. "
              "Si queda granuloso: respin con 1-2 cucharadas de leche fría.")
 
@@ -310,83 +324,107 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
              f"Grasa {fat_v:.1f}% → textura gomosa en Creami",
              "La Creami con exceso de grasa produce textura elástica/gomosa. "
              "Reduce crema o sustituye parte por leche líquida. "
-             "Objetivo para Creami: grasa 4-15 %.")
+             "Objetivo para Creami: grasa 4-15%.")
 
         diag('important', 'water_libre_low', 0 < wat_v < 50,
              f"Agua libre {wat_v:.1f}% → mezcla muy concentrada",
              "Poca agua libre: la Creami puede atascarse o dar textura de pasta. "
-             "Añade leche líquida o agua destilada hasta llegar a 54-62 % agua libre.")
+             "Añade leche líquida o agua destilada hasta llegar a 54-62% agua libre.")
 
         diag('adjustable', 'creami_overrun_hint', True,
-             "Overrun esperado en Ninja Creami: 40-60 %",
+             "Overrun esperado en Ninja Creami: 40-60%",
              "La Creami incorpora más aire que el Pacojet. "
-             "Mezclas con ST 28-35 % producen overrun 50-60 % (textura aireada). "
-             "Mezclas con ST 35-40 % producen overrun 35-45 % (textura más densa).")
+             "Mezclas con ST 28-35% producen overrun 50-60% (textura aireada). "
+             "Mezclas con ST 35-40% producen overrun 35-45% (textura más densa).")
 
-    # ── DIAGNÓSTICOS PACOJET ──────────────────────────────────────────────────
+    # ── PACOJET ───────────────────────────────────────────────────────────────
     if is_paco:
-        diag('critical', 'msnf_high', msnf_v > 11.5,
-             f"MSNF {msnf_v:.1f}% → ARENADO IRREVERSIBLE",
-             "Cristalización de lactosa — defecto permanente. Reduce leche en polvo descremada "
-             "de inmediato. Sustituye por leche líquida o crema.")
+        diag('critical', 'msnf_arenado', msnf_v > msnf_crit,
+             f"MSNF {msnf_v:.1f}% → ARENADO IRREVERSIBLE (umbral Pacojet {msnf_crit}%)",
+             "Cristalización de lactosa — defecto permanente. "
+             "Reduce leche en polvo descremada de inmediato. "
+             "Sustituye por leche líquida o crema.")
 
-        diag('critical', 'pac_pacojet', pac_v > 450,
+        diag('critical', 'pac_pacojet_alto', pac_v > 450,
              f"PAC {pac_v:.0f} → NO CONGELA a −22 °C",
-             "Mezcla no solidifica → beaker inutilizable. Elimina dextrosa o fructosa en exceso. "
+             "Mezcla no solidifica → beaker inutilizable. "
+             "Elimina dextrosa o fructosa en exceso. "
              "Elimina alcohol si supera 40 g/kg.")
 
         diag('important', 'stw_low', 0 < stw_v < 0.50,
              f"Ratio ST/Agua {stw_v:.3f} → demasiada agua libre (Pacojet)",
-             "El raspado produce capas de hielo. Concentra sólidos: más leche en polvo o azúcar. "
+             "El raspado produce capas de hielo. "
+             "Concentra sólidos: más leche en polvo o azúcar. "
              "En sorbetes de fruta acuosa: reduce pulpa.")
 
-    # ── DIAGNÓSTICOS GENERALES ────────────────────────────────────────────────
-    diag('critical', 'st_high', st_v > (40 if is_creami else 44),
+    # ── MANTECADORA ───────────────────────────────────────────────────────────
+    if not is_creami and not is_paco:
+        diag('critical', 'msnf_arenado', msnf_v > msnf_crit,
+             f"MSNF {msnf_v:.1f}% → ARENADO IRREVERSIBLE (umbral {msnf_crit}%)",
+             "Cristalización de lactosa — defecto permanente. "
+             "Reduce leche en polvo descremada.")
+
+        diag('adjustable', 'pac_bajo_mantecadora', 0 < pac_v < pac_lo,
+             f"PAC {pac_v:.0f} → bajo para mantecadora (mín {pac_lo})",
+             "Helado duro al servir. "
+             "① Dextrosa monohidrato (PAC=1.9). "
+             "② Fructosa (PAC=1.9). "
+             "③ Azúcar invertido.")
+
+    # ── GENERALES ─────────────────────────────────────────────────────────────
+    st_max = 40 if is_creami else 44
+    diag('critical', 'st_alto', st_v > st_max,
          f"ST {st_v:.1f}% → SOBRECONCENTRADO",
-         "Textura de pasta, overrun imposible. Añade leche entera o agua hasta el rango objetivo.")
+         "Textura de pasta, overrun imposible. "
+         "Añade leche entera o agua hasta el rango objetivo.")
 
-    diag('important', 'st_low', 0 < st_v < st_lo,
+    diag('important', 'st_bajo', 0 < st_v < st_lo,
          f"ST {st_v:.1f}% → bajos (mín {st_lo}%)",
-         "Cristales grandes, cuerpo acuoso. ① Leche en polvo descremada. "
-         "② Inulina HP. ③ Sustituye leche por crema.")
+         "Cristales grandes, cuerpo acuoso. "
+         "① Leche en polvo descremada. "
+         "② Inulina HP. "
+         "③ Sustituye leche por crema.")
 
-    diag('important', 'fat_low', 0 < fat_v < fat_lo and not is_sorbet,
+    diag('important', 'grasa_baja', 0 < fat_v < fat_lo and not is_sorbet,
          f"Grasa {fat_v:.1f}% → baja (mín {fat_lo}%)",
-         "Textura acuosa, poco cuerpo. ① Sustituye leche por crema 35 %. "
-         "② Yema de huevo (32 % MG + lecitina). ③ Crema de coco si es vegano.")
+         "Textura acuosa, poco cuerpo. "
+         "① Sustituye leche por crema 35%. "
+         "② Yema de huevo (32% MG + lecitina). "
+         "③ Crema de coco si es vegano.")
 
-    diag('important', 'fat_high', fat_v > fat_hi + 2 and not is_creami,
+    diag('important', 'grasa_alta', fat_v > fat_hi + 2 and not is_creami,
          f"Grasa {fat_v:.1f}% → excesiva (máx {fat_hi}%)",
-         "Sabor mantecoso, overrun pobre. Sustituye parte de crema por leche entera.")
+         "Sabor mantecoso, overrun pobre. "
+         "Sustituye parte de crema por leche entera.")
 
-    diag('important', 'sug_high', sug_v > sug_hi + 2,
+    diag('important', 'azucar_alto', sug_v > sug_hi + 2,
          f"Azúcares {sug_v:.1f}% → excesivos (máx {sug_hi}%)",
-         "Helado muy blando, empalagoso. ① Trehalosa (mismo ST, POD 0.45). "
-         "② Isomalt. ③ Inulina HP para mantener volumen.")
+         "Helado muy blando, empalagoso. "
+         "① Trehalosa (mismo ST, POD 0.45). "
+         "② Isomalt. "
+         "③ Inulina HP para mantener volumen.")
 
-    diag('important', 'msnf_low', 0 < msnf_v < msnf_lo and not is_sorbet and not is_vegan,
-         f"MSNF {msnf_v:.1f}% → bajo (mín {msnf_lo}%)",
-         "Poca estructura proteica, overrun pobre. Añade leche en polvo descremada "
-         "(52 % MSNF, la fuente más concentrada).")
+    diag('important', 'msnf_bajo', 0 < msnf_v < tgt['msnf'][0] and not is_sorbet and not is_vegan,
+         f"MSNF {msnf_v:.1f}% → bajo (mín {tgt['msnf'][0]}%)",
+         "Poca estructura proteica, overrun pobre. "
+         "Añade leche en polvo descremada (52% MSNF).")
 
-    diag('adjustable', 'pod_low', 0 < pod_v < pod_lo,
+    diag('adjustable', 'pod_bajo', 0 < pod_v < pod_lo,
          f"POD {pod_v:.0f} → dulzor bajo (mín {pod_lo})",
-         "① Fructosa (POD 1.2). ② 0.5 g/kg de Stevia Reb-A. "
+         "① Fructosa (POD 1.2). "
+         "② 0.5 g/kg de Stevia Reb-A. "
          "③ 1-2 g/kg de sal marina potencia el dulce.")
 
-    diag('adjustable', 'pod_high', pod_v > pod_hi,
+    diag('adjustable', 'pod_alto', pod_v > pod_hi,
          f"POD {pod_v:.0f} → puede fatigar el paladar",
-         "① Ácido cítrico 1-3 g/kg. ② Sustituye fructosa por glucosa DE40 (POD 0.5). "
+         "① Ácido cítrico 1-3 g/kg. "
+         "② Sustituye fructosa por glucosa DE40 (POD 0.5). "
          "③ Sal marina equilibra.")
 
-    diag('adjustable', 'pac_low', not is_paco and not is_creami and 0 < pac_v < pac_lo,
-         f"PAC {pac_v:.0f} → bajo para mantecadora",
-         "Helado duro al servir. ① Dextrosa monohidrato (PAC=1.9). "
-         "② Fructosa (PAC=1.9). ③ Azúcar invertido.")
-
-    diag('adjustable', 'sug_low', 0 < sug_v < sug_lo,
+    diag('adjustable', 'azucar_bajo', 0 < sug_v < sug_lo,
          f"Azúcares {sug_v:.1f}% → bajos (mín {sug_lo}%)",
-         "① Aumenta sacarosa o dextrosa. ② Fructosa si es sorbete. "
+         "① Aumenta sacarosa o dextrosa. "
+         "② Fructosa si es sorbete. "
          "③ Glucosa DE40 para textura sin exceso de dulzor.")
 
     d['diagnostics'] = diags
@@ -398,6 +436,12 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
 # ─────────────────────────────────────────────────────────────────────────────
 
 def overrun_calc(base_grams, overrun_pct, target_liters, machine='Ninja Creami Deluxe'):
+    """
+    Calcula overrun y rendimiento por máquina.
+
+    FIX B3: añadidos los campos 'volume_increase' y 'final_grams_per_liter'
+    que los tests unitarios esperan.
+    """
     or_pct = overrun_pct / 100
 
     if 'Deluxe' in machine:
@@ -405,7 +449,7 @@ def overrun_calc(base_grams, overrun_pct, target_liters, machine='Ninja Creami D
     elif 'Standard' in machine:
         cap = CREAMI_STANDARD_CAPACITY_G
     else:
-        cap = PACOJET_CAPACITY_ML   # Pacojet / mantecadora: lógica original
+        cap = PACOJET_CAPACITY_ML
 
     base_needed    = target_liters * 1000 / (1 + or_pct)
     liters_prod    = base_grams / 1000 * (1 + or_pct)
@@ -414,15 +458,18 @@ def overrun_calc(base_grams, overrun_pct, target_liters, machine='Ninja Creami D
     resto_g        = (potes_exacto - potes_enteros) * cap
 
     return {
-        'base_needed_g':       base_needed,
-        'liters_from_base':    liters_prod,
-        'potes_completos':     potes_enteros,
-        'potes_total':         potes_exacto,
-        'masa_ultimo_pote_g':  resto_g,
-        'masa_por_pote_g':     cap,
-        # Compatibilidad hacia atrás (Pacojet)
-        'pacojet_beakers':     math.ceil(target_liters * 1000 / ((1 + or_pct) * 500)),
-        'mix_per_beaker':      500 / (1 + or_pct),
+        'base_needed_g':          base_needed,
+        'liters_from_base':       liters_prod,
+        'potes_completos':        potes_enteros,
+        'potes_total':            potes_exacto,
+        'masa_ultimo_pote_g':     resto_g,
+        'masa_por_pote_g':        cap,
+        # Compatibilidad Pacojet / mantecadora
+        'pacojet_beakers':        math.ceil(target_liters * 1000 / ((1 + or_pct) * 500)),
+        'mix_per_beaker':         500 / (1 + or_pct),
+        # Campos nuevos — requeridos por test_calculator.py
+        'volume_increase':        overrun_pct,
+        'final_grams_per_liter':  base_grams / liters_prod if liters_prod > 0 else 0,
     }
 
 
@@ -441,12 +488,12 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
     if m <= 0:
         return recs
 
-    water_pct  = pct.get('water_pct', 0)
-    fat_pct    = pct.get('fat_pct',   0)
-    st_pct     = pct.get('st_pct',    0)
+    water_pct = pct.get('water_pct', 0)
+    fat_pct   = pct.get('fat_pct',   0)
+    st_pct    = pct.get('st_pct',    0)
 
-    is_sorbet  = 'Sorbete' in product_type or 'Granita' in product_type
-    is_creami  = 'Ninja Creami' in machine
+    is_sorbet = 'Sorbete' in product_type or 'Granita' in product_type
+    is_creami = 'Ninja Creami' in machine
     names_lower = [n.lower() for n in (ingredient_names or [])]
 
     has_cmc       = any('cmc' in n or 'carboximetil' in n for n in names_lower)
@@ -469,7 +516,7 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'dose_g_per_kg': f'CMC: {dose_cmc} g/kg + Xantana: 0.8 g/kg',
             'dose_g_recipe': f'CMC: {dose_cmc * m/1000:.1f} g + Xantana: {0.8 * m/1000:.1f} g',
             'priority':      'necesario',
-            'reason':        f'Sorbete sin lácteos con {water_pct:.1f} % agua libre. '
+            'reason':        f'Sorbete sin lácteos con {water_pct:.1f}% agua libre. '
                              'Sin estabilizante: cristales visibles y textura de granizado.',
             'warning':       'En frutas ácidas (pH<4.5): usa más Xantana y menos CMC. '
                              'Xantana es estable en ácido, CMC se degrada a pH<4.'
@@ -483,7 +530,7 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'dose_g_per_kg': f'{dose_cmc:.1f} g/kg',
             'dose_g_recipe': f'{dose_cmc * m/1000:.1f} g',
             'priority':      'recomendado',
-            'reason':        f'Grasa baja ({fat_pct:.1f} %) y agua libre alta ({water_pct:.1f} %). '
+            'reason':        f'Grasa baja ({fat_pct:.1f}%) y agua libre alta ({water_pct:.1f}%). '
                              'La grasa retiene agua naturalmente; sin ella el CMC compensa.',
             'warning':       'Si ya tienes Natulac: reduce CMC a 0.5 g/kg máximo. '
                              'Si la fruta tiene pectina natural (cambur, mango): no añadas CMC.'
@@ -532,7 +579,7 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'dose_g_per_kg': '—',
             'dose_g_recipe': '—',
             'priority':      'opcional',
-            'reason':        f'ST {st_pct:.1f} % y agua libre {water_pct:.1f} %. '
+            'reason':        f'ST {st_pct:.1f}% y agua libre {water_pct:.1f}%. '
                              'Los sólidos naturales son suficientes para retener el agua.',
             'warning':       'Si añades espesante con estos sólidos → riesgo de textura gomosa.'
         })
@@ -574,7 +621,6 @@ def analyze_sweeteners(lines_with_ings):
         pod_contrib = g * float(ing.get('pod', 0))
         pac_contrib = g * float(ing.get('pac', 0))
 
-        # Solo incluir si aporta POD/PAC significativo o tiene azúcares
         if pod_contrib > 0.5 or pac_contrib > 0.5 or float(ing.get('sugars', 0)) > 5:
             total_pod += pod_contrib
             total_pac += pac_contrib
@@ -586,29 +632,27 @@ def analyze_sweeteners(lines_with_ings):
                     profile = prof
                     break
 
-            # Advertencias específicas
             pct_in_mix = g / total_grams_all * 100
             warning = None
             if 'eritritol' in name_lower and pct_in_mix > 1.5:
-                warning = f"⚠️ Eritritol al {pct_in_mix:.1f} % → efecto mentolado probable. Máximo 1.5 %"
+                warning = f"⚠️ Eritritol al {pct_in_mix:.1f}% → efecto mentolado probable. Máximo 1.5%"
             elif 'stevia' in name_lower and g > 0.5:
                 warning = f"⚠️ Stevia {g:.1f} g → retrogusto posible. Máximo 0.3 g/kg"
             elif 'fructosa' in name_lower and pct_in_mix > 8:
-                warning = f"⚠️ Fructosa alta ({pct_in_mix:.1f} %) → puede resultar empalagosa"
+                warning = f"⚠️ Fructosa alta ({pct_in_mix:.1f}%) → puede resultar empalagosa"
 
             sweetener_lines.append({
-                'nombre':        ing['name'],
-                'gramos':        g,
-                'pod_contrib':   round(pod_contrib, 1),
-                'pac_contrib':   round(pac_contrib, 1),
-                'sugars_g':      round(g * float(ing.get('sugars', 0)) / 100, 1),
-                'kcal_estimadas':round(g * float(ing.get('sugars', 0)) / 100 * 4, 1),
-                'efecto_sabor':  profile[3] if profile else 'Sin perfil registrado',
-                'perfil_dulzor': profile[4] if profile else '—',
-                'warning':       warning,
+                'nombre':         ing['name'],
+                'gramos':         g,
+                'pod_contrib':    round(pod_contrib, 1),
+                'pac_contrib':    round(pac_contrib, 1),
+                'sugars_g':       round(g * float(ing.get('sugars', 0)) / 100, 1),
+                'kcal_estimadas': round(g * float(ing.get('sugars', 0)) / 100 * 4, 1),
+                'efecto_sabor':   profile[3] if profile else 'Sin perfil registrado',
+                'perfil_dulzor':  profile[4] if profile else '—',
+                'warning':        warning,
             })
 
-    # Calcular porcentajes del total
     for s in sweetener_lines:
         s['pct_pod'] = round(s['pod_contrib'] / total_pod * 100, 1) if total_pod > 0 else 0
         s['pct_pac'] = round(s['pac_contrib'] / total_pac * 100, 1) if total_pac > 0 else 0
