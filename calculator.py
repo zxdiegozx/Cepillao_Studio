@@ -1,12 +1,15 @@
 """Pure calculation engine — sin dependencias externas."""
 
 import math
+from datetime import datetime
+
 from constants import (
     PRODUCT_SORBETE, PRODUCT_GRANITA, PRODUCT_VEGANO,
     PRODUCT_FROZEN,  PRODUCT_LIGERO,
     MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD,
     MACHINE_PACOJET,
     PRIORITY_CRITICAL, PRIORITY_IMPORTANT, PRIORITY_ADJUSTABLE,
+    DIAGS_EXCLUIR_TICKET, CATEGORY_ALCOHOL, ALCOHOL_ETHANOL_FRACTION,
 )
 
 # ── Capacidades de máquinas ───────────────────────────────────────────────────
@@ -27,7 +30,6 @@ CREAMI_FREEZE_HOURS_MIN = 24
 CREAMI_DELTA_T_MIN      = -1.5    # ΔT mínimo para congelar a -18 °C
 
 # ── Perfiles organolépticos de edulcorantes ───────────────────────────────────
-# FIX B1: eliminada la clave duplicada 'azucar invertido' (POD correcto = 1.30)
 # Estructura: (POD, PAC, kcal/g, descripción_sabor, perfil_dulzor)
 SWEETENER_PROFILES = {
     'sacarosa':         (1.00, 1.00, 4.0, 'Referencia — dulzor limpio y redondo',        'inmediato'),
@@ -44,6 +46,68 @@ SWEETENER_PROFILES = {
     'glucosa de40':     (0.50, 0.80, 4.0, 'Antirecristalizante suave, neutro',           'inmediato'),
     'glucosa de60':     (0.70, 0.90, 4.0, 'Mayor dulzor que DE40, neutro',               'inmediato'),
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETECCIÓN DE ALCOHOL POR LÍNEA (MEJORA: reemplaza placeholder)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _detect_alcohol_lines(lines_with_ings):
+    """
+    Itera las líneas de la receta e identifica ingredientes alcohólicos
+    por categoría ('Alcohol') o por coincidencia de nombre con
+    ALCOHOL_ETHANOL_FRACTION.
+
+    Retorna lista de dicts:
+      ingredient_name  — nombre del ingrediente
+      grams            — gramos en la receta
+      ethanol_g        — gramos de etanol puro estimados
+      ethanol_fraction — fracción másica de etanol usado
+      pac_contrib      — contribución real al PAC (etanol PAC=3.5)
+    """
+    results = []
+    for ing, grams, _ in lines_with_ings:
+        if not ing or not grams:
+            continue
+        g = float(grams)
+        name_lower = ing.get('name', '').lower()
+        category   = ing.get('category', '')
+
+        ethanol_fraction = 0.0
+
+        # Prioridad 1: categoría explícita 'Alcohol' en la BD
+        if category == CATEGORY_ALCOHOL:
+            # Buscar fracción específica por nombre; si no, usar PAC/3.5 como proxy
+            for key, frac in ALCOHOL_ETHANOL_FRACTION.items():
+                if key in name_lower:
+                    ethanol_fraction = frac
+                    break
+            if ethanol_fraction == 0.0:
+                # Fallback: inferir desde PAC del ingrediente
+                # PAC_etanol = 3.5 por definición; otros solutos del licor aportan ~0.5
+                pac_ing = float(ing.get('pac', 0))
+                pac_azucares = float(ing.get('sugars', 0)) / 100 * float(ing.get('pod', 1))
+                pac_alcohol_ing = max(0, pac_ing - pac_azucares)
+                ethanol_fraction = min(pac_alcohol_ing / 3.5, 0.5)
+
+        # Prioridad 2: nombre contiene keyword conocido de licor
+        elif any(key in name_lower for key in ALCOHOL_ETHANOL_FRACTION):
+            for key, frac in ALCOHOL_ETHANOL_FRACTION.items():
+                if key in name_lower:
+                    ethanol_fraction = frac
+                    break
+
+        if ethanol_fraction > 0:
+            ethanol_g = g * ethanol_fraction
+            results.append({
+                'ingredient_name':  ing.get('name', ''),
+                'grams':            g,
+                'ethanol_g':        ethanol_g,
+                'ethanol_fraction': ethanol_fraction,
+                'pac_contrib':      ethanol_g * 3.5,
+            })
+
+    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,9 +173,12 @@ def calc_percentages(totals):
 # CÁLCULO DE CALORÍAS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calc_calories(totals):
+def calc_calories(totals, lines_with_ings=None):
     """
     Estima calorías totales y por 100 g desde macronutrientes.
+    Si se pasan lines_with_ings, descuenta calorías de ingredientes
+    zero_calorie (eritritol, stevia, alulosa) que la BD marca como tal.
+
     Retorna dict: kcal_total, kcal_per_100g, kcal_per_pote_deluxe.
     """
     m = totals.get('grams', 0)
@@ -127,6 +194,23 @@ def calc_calories(totals):
         totals.get('other_st', 0) * KCAL_OTHER
     )
 
+    # Descontar calorías de ingredientes marcados zero_calorie en BD
+    if lines_with_ings:
+        for ing, grams, _ in lines_with_ings:
+            if not ing or not grams:
+                continue
+            if ing.get('zero_calorie', 0):
+                g = float(grams)
+                # Restar lo que se sumó por azúcares de ese ingrediente
+                kcal -= g * float(ing.get('sugars', 0)) / 100 * KCAL_SUGAR
+
+    # Añadir calorías de alcohol detectado
+    if lines_with_ings:
+        alcohol_lines = _detect_alcohol_lines(lines_with_ings)
+        for a in alcohol_lines:
+            kcal += a['ethanol_g'] * KCAL_ALCOHOL
+
+    kcal = max(0, kcal)
     kcal_per_100g = kcal / m * 100
     kcal_per_pote = kcal_per_100g * CREAMI_DELUXE_CAPACITY_G / 100
 
@@ -177,11 +261,9 @@ def validate_brix(measured_brix: float, totals: dict) -> dict:
             'sugars_estimados_g': 0,
         }
 
-    # Brix desde azúcares puros de la receta
     brix_calc = totals['sugars'] / m * 100
 
     # Corrección MSNF: la lactosa (~55% del MSNF) es soluble y visible al refractómetro
-    # Los minerales del suero (~8% del MSNF) también contribuyen ligeramente
     lactosa_g      = totals.get('msnf', 0) * 0.55
     minerales_g    = totals.get('msnf', 0) * 0.08
     brix_con_msnf  = (totals['sugars'] + lactosa_g + minerales_g) / m * 100
@@ -210,14 +292,10 @@ def validate_brix(measured_brix: float, totals: dict) -> dict:
         interpretacion = (
             f"⚠️ Brix medido {measured_brix:.1f}° es {delta:.1f}° mayor al esperado "
             f"({brix_con_msnf:.1f}°). Posibles causas: "
-            "① hay más azúcar del declarado en la receta (frutas más maduras, "
-            "leche condensada con más sólidos), "
-            "② el instrumento está descalibrado o tiene gotas de mezcla anterior."
+            "① hay más azúcar del declarado (frutas más maduras, leche condensada con más sólidos), "
+            "② el instrumento está descalibrado o tiene residuo de mezcla anterior."
         )
 
-    # Inferir gramos de azúcar desde el Brix medido (inversa de la fórmula)
-    # Brix_medido ≈ (sugars + lactosa + minerales) / m * 100
-    # sugars_est = Brix_medido/100 * m - lactosa - minerales
     sugars_est = max(0, measured_brix / 100 * m - lactosa_g - minerales_g)
 
     return {
@@ -231,7 +309,7 @@ def validate_brix(measured_brix: float, totals: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FUNCIONES AUXILIARES — exportadas (FIX B2)
+# FUNCIONES AUXILIARES — exportadas
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_targets(product_type: str, machine: str) -> dict:
@@ -326,10 +404,23 @@ def _status(val: float, lo, hi) -> str:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANÁLISIS DERIVADO — RANGOS, SEMÁFORO, DIAGNÓSTICOS
+# MEJORA: ahora acepta lines_with_ings para diagnósticos por ingrediente
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Creami Deluxe'):
-    """Ratios, crioscopía, semáforo y diagnósticos."""
+def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Creami Deluxe',
+                 lines_with_ings=None):
+    """
+    Ratios, crioscopía, semáforo y diagnósticos.
+
+    Parámetros
+    ----------
+    totals          : salida de calc_totals()
+    pct             : salida de calc_percentages()
+    product_type    : constante PRODUCT_*
+    machine         : constante MACHINE_*
+    lines_with_ings : list of (ingredient_dict, grams, price_per_kg) — opcional,
+                      necesario para diagnósticos de alcohol precisos
+    """
     d = {}
     m = totals['grams']
     if m <= 0:
@@ -348,41 +439,26 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
 
     # ── Crioscopía ────────────────────────────────────────────────────────────
     # Modelo molar corregido basado en la ley de Raoult con PM efectivo.
-    #
-    # El PAC relativo de cada edulcorante ya codifica su PM implícitamente:
-    #   PAC_i = PM_sacarosa / PM_i   (aproximación práctica del sector)
-    #   → PM_efectivo_i = PM_sacarosa / PAC_i
-    # Por tanto: moles_i = g_i * PAC_i / PM_sacarosa
-    # Y la suma de moles de todos los solutos = PAC_total / PM_sacarosa
-    # ΔT = -Kf * moles_totales / kg_agua = -1.858 * (PAC_total / 342) / water_kg
-    #
-    # Para mezclas concentradas (Brix estimado ≥ 22°) se aplica la corrección
-    # no-lineal de Chen-Leighton: ΔT *= (1 + B * molalidad) con B = 0.004
-    # Referencia: Chen (1985), Goff & Hartel "Ice Cream" 7th ed. cap. 3
-    #
-    # Validación con casos conocidos:
-    #   Leche entera + 13% sacarosa → ΔT ≈ -2.0°C  ✓ (literatura: -1.8 a -2.2°C)
-    #   Sorbete 30% azúcar          → ΔT ≈ -2.3°C  ✓ (literatura: -2.0 a -2.5°C)
-
+    # Para mezclas concentradas (Brix ≥ 22°) aplica corrección Chen-Leighton.
     water_kg  = totals['water'] / 1000
     pac_total = totals['pac']
     sugars_kg = totals['sugars'] / 1000
     brix_est  = sugars_kg / (water_kg + sugars_kg) * 100 if (water_kg + sugars_kg) > 0 else 0
 
     if water_kg > 0 and pac_total > 0:
-        PM_SACAROSA = 342.0    # g/mol, referencia del sistema PAC
-        KF_AGUA     = 1.858    # °C·kg/mol (constante crioscópica del agua)
-        molalidad   = pac_total / PM_SACAROSA / water_kg   # mol/kg agua
+        PM_SACAROSA = 342.0
+        KF_AGUA     = 1.858
+        molalidad   = pac_total / PM_SACAROSA / water_kg
 
         if brix_est >= 22:
-            B = 0.004   # coeficiente de interacción Chen-Leighton
-            d['delta_t']        = -KF_AGUA * molalidad * (1 + B * molalidad)
+            B = 0.004
+            d['delta_t']         = -KF_AGUA * molalidad * (1 + B * molalidad)
             d['cryoscopy_model'] = 'Chen-Leighton'
         else:
-            d['delta_t']        = -KF_AGUA * molalidad
+            d['delta_t']         = -KF_AGUA * molalidad
             d['cryoscopy_model'] = 'Raoult'
     else:
-        d['delta_t']        = 0.0
+        d['delta_t']         = 0.0
         d['cryoscopy_model'] = 'n/a'
 
     d['brix_estimado'] = round(brix_est, 1)
@@ -397,7 +473,7 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
     else:
         d['temp_servicio'] = "-12 a -14 °C"
 
-    # ── Rangos objetivo (FIX B2: via _get_targets exportada) ─────────────────
+    # ── Rangos objetivo ───────────────────────────────────────────────────────
     tgt = _get_targets(product_type, machine)
     d['targets'] = tgt
 
@@ -418,7 +494,7 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
     stw_v  = d['ratio_st_water']
     wat_v  = pct.get('water_pct', 0)
 
-    # ── Semáforo (FIX B2: via _status exportada, soporta lo=None) ────────────
+    # ── Semáforo ──────────────────────────────────────────────────────────────
     d['status'] = {
         'st':       _status(st_v,   st_lo,           st_hi),
         'fat':      _status(fat_v,  fat_lo,          fat_hi),
@@ -476,14 +552,6 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
 
     # ── PACOJET ───────────────────────────────────────────────────────────────
     if is_paco:
-        # D4: distinguir si el MSNF viene de fuentes con lactosa o sin ella.
-        # WPC/WPI (suero de leche en la BD) tiene msnf alto pero lactosa <1%.
-        # La cristalización de lactosa solo ocurre cuando hay lactosa real.
-        # Heurística: si el ingrediente 'suero' o 'whey' domina el MSNF,
-        # el umbral de arenado sube porque la lactosa es mínima.
-        # Aquí usamos el ratio sugars/msnf como proxy:
-        # en leche en polvo: sugars≈50%, msnf≈52% → ratio ≈0.96 (mucha lactosa)
-        # en WPC: sugars≈5%, msnf≈80% → ratio ≈0.06 (casi sin lactosa)
         ratio_lactosa_msnf = totals['sugars'] / totals['msnf'] if totals['msnf'] > 0 else 0
         msnf_crit_efectivo = msnf_crit if ratio_lactosa_msnf > 0.3 else msnf_crit + 3.0
 
@@ -578,36 +646,46 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
          "② Fructosa si es sorbete. "
          "③ Glucosa DE40 para textura sin exceso de dulzor.")
 
-    # ── D2: alcohol — guardia de dosis máxima ────────────────────────────────
-    # PAC del etanol = 3.50 por definición en la BD.
-    # A dosis >40 g/kg de alcohol puro la mezcla no solidifica correctamente.
-    # Detectamos ingredientes alcohólicos por PAC alto + water_pct intermedia
-    # (ron 40%: water=57.8%, PAC=3.5; amaretto: water=74.5%, PAC=2.3)
-    alcohol_g_total = 0.0
-    for _, g, _ in []:  # placeholder — ver nota abajo
-        pass
-    # Estimación desde el PAC total relativo a azúcares:
-    # pac_no_azucar = PAC total - contribución estimada de azúcares
-    pac_azucares_est = totals['sugars'] * 1.0   # sacarosa PAC=1.0 como proxy
-    pac_alcohol_est  = max(0, totals['pac'] - pac_azucares_est - totals['msnf'] * 0.5)
-    # Etanol aporta PAC=3.5; dosis equivalente en g:
-    alcohol_equiv_g  = pac_alcohol_est / 3.5
-    alcohol_pct_mix  = alcohol_equiv_g / m * 100 if m > 0 else 0
+    # ── ALCOHOL — detección real por línea (MEJORA: reemplaza placeholder) ────
+    alcohol_lines = _detect_alcohol_lines(lines_with_ings or [])
+    if alcohol_lines:
+        ethanol_total_g = sum(a['ethanol_g'] for a in alcohol_lines)
+        ethanol_pct_mix = ethanol_total_g / m * 100
 
-    diag(PRIORITY_CRITICAL, 'alcohol_exceso',
-         alcohol_equiv_g > 0 and alcohol_pct_mix > 4.0,
-         f"Alcohol estimado ~{alcohol_pct_mix:.1f}% → NO CONGELA",
-         f"Alcohol equivalente estimado: {alcohol_equiv_g:.0f} g en {m:.0f} g de mezcla. "
-         "Con >4% de etanol en la mezcla el punto de congelación cae por debajo de −18 °C "
-         "y la Creami/Pacojet no puede procesar correctamente. "
-         "Reduce el licor o cámbialo por extracto sin alcohol.")
+        nombres_alcohol = ", ".join(a['ingredient_name'] for a in alcohol_lines)
 
-    diag(PRIORITY_IMPORTANT, 'alcohol_advertencia',
-         alcohol_equiv_g > 0 and 2.5 < alcohol_pct_mix <= 4.0,
-         f"Alcohol estimado ~{alcohol_pct_mix:.1f}% → textura blanda",
-         f"Alcohol equivalente estimado: {alcohol_equiv_g:.0f} g. "
-         "Entre 2.5-4%: la mezcla congela pero puede quedar muy blanda. "
-         "Compensa con +20-30 g de dextrosa para subir el PAC de azúcares.")
+        diag(PRIORITY_CRITICAL, 'alcohol_exceso',
+             ethanol_pct_mix > 4.0,
+             f"Alcohol {ethanol_pct_mix:.1f}% etanol → NO CONGELA",
+             f"Ingredientes: {nombres_alcohol}. "
+             f"Etanol estimado: {ethanol_total_g:.1f} g en {m:.0f} g de mezcla. "
+             "Con >4% etanol el punto de congelación cae por debajo de −18 °C. "
+             "Reduce el licor o usa extracto sin alcohol.")
+
+        diag(PRIORITY_IMPORTANT, 'alcohol_advertencia',
+             2.5 < ethanol_pct_mix <= 4.0,
+             f"Alcohol {ethanol_pct_mix:.1f}% etanol → textura blanda",
+             f"Ingredientes: {nombres_alcohol}. "
+             f"Etanol estimado: {ethanol_total_g:.1f} g. "
+             "Entre 2.5-4%: congela pero puede quedar muy blando. "
+             "Compensa con +20-30 g de dextrosa para subir el PAC de azúcares.")
+
+        diag(PRIORITY_ADJUSTABLE, 'alcohol_info',
+             ethanol_pct_mix <= 2.5,
+             f"Alcohol {ethanol_pct_mix:.1f}% etanol — dosis correcta",
+             f"Ingredientes: {nombres_alcohol}. "
+             f"Etanol estimado: {ethanol_total_g:.1f} g. "
+             "Dosis dentro de rango seguro para congelación. "
+             "El alcohol aporta aroma y suaviza ligeramente la textura.")
+
+        # Guardar datos de alcohol en d para uso en UI/ticket
+        d['alcohol_detected'] = {
+            'lines':           alcohol_lines,
+            'ethanol_total_g': round(ethanol_total_g, 1),
+            'ethanol_pct':     round(ethanol_pct_mix, 2),
+        }
+    else:
+        d['alcohol_detected'] = None
 
     d['diagnostics'] = diags
     return d
@@ -620,9 +698,7 @@ def calc_derived(totals, pct, product_type='Helado/Gelato', machine='Ninja Cream
 def overrun_calc(base_grams, overrun_pct, target_liters, machine='Ninja Creami Deluxe'):
     """
     Calcula overrun y rendimiento por máquina.
-
-    FIX B3: añadidos los campos 'volume_increase' y 'final_grams_per_liter'
-    que los tests unitarios esperan.
+    Incluye campos 'volume_increase' y 'final_grams_per_liter'.
     """
     or_pct = overrun_pct / 100
 
@@ -640,18 +716,86 @@ def overrun_calc(base_grams, overrun_pct, target_liters, machine='Ninja Creami D
     resto_g        = (potes_exacto - potes_enteros) * cap
 
     return {
-        'base_needed_g':          base_needed,
-        'liters_from_base':       liters_prod,
-        'potes_completos':        potes_enteros,
-        'potes_total':            potes_exacto,
-        'masa_ultimo_pote_g':     resto_g,
-        'masa_por_pote_g':        cap,
-        # Compatibilidad Pacojet / mantecadora
-        'pacojet_beakers':        math.ceil(target_liters * 1000 / ((1 + or_pct) * 500)),
-        'mix_per_beaker':         500 / (1 + or_pct),
-        # Campos nuevos — requeridos por test_calculator.py
-        'volume_increase':        overrun_pct,
-        'final_grams_per_liter':  base_grams / liters_prod if liters_prod > 0 else 0,
+        'base_needed_g':         base_needed,
+        'liters_from_base':      liters_prod,
+        'potes_completos':       potes_enteros,
+        'potes_total':           potes_exacto,
+        'masa_ultimo_pote_g':    resto_g,
+        'masa_por_pote_g':       cap,
+        'pacojet_beakers':       math.ceil(target_liters * 1000 / ((1 + or_pct) * 500)),
+        'mix_per_beaker':        500 / (1 + or_pct),
+        'volume_increase':       overrun_pct,
+        'final_grams_per_liter': base_grams / liters_prod if liters_prod > 0 else 0,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D5: ACTIVIDAD DE AGUA — ecuación de Ross
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calc_water_activity(totals: dict) -> dict:
+    """
+    Estima la actividad de agua (Aw) usando la ecuación de Ross (1975).
+
+    Ross: Aw ≈ n_agua / (n_agua + n_solutos)
+    Incluye contribución de lactosa (55% del MSNF), minerales iónicos (8% MSNF),
+    y azúcares con PM promedio ponderado de 270 g/mol.
+
+    Retorna dict: aw, aw_pct, riesgo_micro, interpretacion, modelo.
+    """
+    m       = totals.get('grams', 0)
+    water_g = totals.get('water', 0)
+    sugars_g = totals.get('sugars', 0)
+    msnf_g  = totals.get('msnf', 0)
+
+    if water_g <= 0 or m <= 0:
+        return {
+            'aw': 1.0, 'aw_pct': 100.0,
+            'riesgo_micro': 'sin_datos',
+            'interpretacion': 'Sin agua en la mezcla — no se puede calcular Aw.',
+            'modelo': 'Ross (1975)',
+        }
+
+    n_agua     = water_g / 18.015
+    n_azucares = sugars_g / 270.0
+    lactosa_g  = msnf_g * 0.55
+    sal_g      = msnf_g * 0.08
+    n_lactosa  = lactosa_g / 342.0
+    n_sal      = sal_g / 58.44 * 2   # disociación iónica NaCl
+
+    n_solutos_total = n_azucares + n_lactosa + n_sal
+    aw = n_agua / (n_agua + n_solutos_total)
+    aw = max(0.0, min(1.0, aw))
+
+    if aw < 0.85:
+        riesgo = 'bajo'
+        interpretacion = (
+            f"✅ Aw {aw:.3f} — actividad de agua muy baja. "
+            "Crecimiento microbiano inhibido para la mayoría de patógenos. "
+            "Estabilidad microbiológica excelente en almacenamiento congelado."
+        )
+    elif aw < 0.91:
+        riesgo = 'medio'
+        interpretacion = (
+            f"⚠️ Aw {aw:.3f} — zona intermedia. "
+            "Levaduras osmófilas pueden crecer si hay descongelación parcial. "
+            "Mantener cadena de frío estricta. "
+            "Considera añadir trehalosa (crioprotector) para mejorar estabilidad."
+        )
+    else:
+        riesgo = 'alto'
+        interpretacion = (
+            f"🔴 Aw {aw:.3f} — actividad de agua alta (mezcla muy diluida). "
+            "Normal para bases lácteas estándar — controlar pasteurización y "
+            "tiempo entre mezcla y congelación (máximo 2 horas a temperatura ambiente)."
+        )
+
+    return {
+        'aw':            round(aw, 4),
+        'aw_pct':        round(aw * 100, 2),
+        'riesgo_micro':  riesgo,
+        'interpretacion': interpretacion,
+        'modelo':        'Ross (1975)',
     }
 
 
@@ -690,7 +834,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
     has_fruta_acida = any(f in n for n in names_lower
                           for f in ['maracuyá', 'limón', 'piña', 'naranja'])
 
-    # REGLA 1: Sorbete sin lácteos — necesita estabilizante
     if is_sorbet and water_pct > 65 and not has_cmc and not has_xantana and not has_pectina:
         dose_cmc = 1.5 if water_pct > 72 else 1.2
         recs.append({
@@ -704,7 +847,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
                              'Xantana es estable en ácido, CMC se degrada a pH<4.'
         })
 
-    # REGLA 2: Helado light con poca grasa
     elif not is_sorbet and fat_pct < 5 and water_pct > 63 and not has_cmc:
         dose_cmc = min(1.5, (water_pct - 58) / 10 * 1.5)
         recs.append({
@@ -718,7 +860,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
                              'Si la fruta tiene pectina natural (cambur, mango): no añadas CMC.'
         })
 
-    # REGLA 3: Triple gelificación (Natulac + CMC + fruta con pectina)
     if has_natulac and has_cmc and has_fruta_pectina:
         recs.append({
             'stabilizer':    '⚠️ ADVERTENCIA — Triple gelificación',
@@ -730,7 +871,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'warning':       'Regla fija: Natulac + fruta de pectina alta → NUNCA añadir CMC.'
         })
 
-    # REGLA 4: Natulac con fruta ácida
     if has_natulac and has_fruta_acida and not has_xantana:
         recs.append({
             'stabilizer':    'Xantana',
@@ -742,7 +882,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'warning':       None
         })
 
-    # REGLA 5: Lecitina — recomendada si hay grasa significativa
     if not has_lecitina and fat_pct > 4 and not is_sorbet:
         recs.append({
             'stabilizer':    'Lecitina de girasol',
@@ -754,7 +893,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'warning':       'Premezclar en seco con la leche en polvo antes de añadir a líquidos.'
         })
 
-    # REGLA 6: ST suficientemente alto — no necesita espesante
     if st_pct >= 38 and water_pct <= 58 and not is_sorbet and not recs:
         recs.append({
             'stabilizer':    '✅ Sin espesante necesario',
@@ -766,7 +904,6 @@ def recommend_stabilizers(totals, pct, product_type, machine, ingredient_names=N
             'warning':       'Si añades espesante con estos sólidos → riesgo de textura gomosa.'
         })
 
-    # REGLA 7: Trehalosa siempre recomendada para Creami
     if not has_trehalosa and is_creami:
         recs.append({
             'stabilizer':    'Trehalosa (crioprotector)',
@@ -843,110 +980,7 @@ def analyze_sweeteners(lines_with_ings):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# D5: ACTIVIDAD DE AGUA — ecuación de Ross
-# ─────────────────────────────────────────────────────────────────────────────
-
-def calc_water_activity(totals: dict) -> dict:
-    """
-    Estima la actividad de agua (Aw) usando la ecuación de Ross (1975).
-
-    Ross: Aw = Aw_agua_pura × ∏(Aw_i)
-    Para soluciones diluidas: Aw_i ≈ 1 - (n_i / n_total_agua)
-    donde n_i = moles de soluto i, n_agua = moles de agua.
-
-    En helados la Aw de la mezcla antes de congelar determina:
-    - Riesgo microbiológico (Aw < 0.85 → crecimiento inhibido)
-    - Estabilidad en almacenamiento (Aw < 0.90 → menor riesgo de cristalización)
-    - Para sorbetes con alcohol: la Aw real es más baja que el cálculo solo de azúcares
-
-    Referencia: Ross (1975), aplicado a helados por Goff & Hartel (2013) cap. 3.
-
-    Parámetros
-    ----------
-    totals : salida de calc_totals()
-
-    Retorna
-    -------
-    dict con:
-      aw                — actividad de agua estimada (0-1)
-      aw_pct            — como % para mostrar en UI
-      riesgo_micro      — 'bajo' | 'medio' | 'alto'
-      interpretacion    — texto explicativo
-      modelo            — 'Ross (1975)'
-    """
-    m = totals.get('grams', 0)
-    water_g   = totals.get('water', 0)
-    sugars_g  = totals.get('sugars', 0)
-    msnf_g    = totals.get('msnf', 0)
-
-    if water_g <= 0 or m <= 0:
-        return {
-            'aw': 1.0, 'aw_pct': 100.0,
-            'riesgo_micro': 'sin_datos',
-            'interpretacion': 'Sin agua en la mezcla — no se puede calcular Aw.',
-            'modelo': 'Ross (1975)',
-        }
-
-    # Moles de agua
-    n_agua = water_g / 18.015
-
-    # Contribución de azúcares: PM promedio ponderado
-    # sacarosa=342, glucosa/fructosa=180; en mezcla típica ~270 g/mol
-    n_azucares = sugars_g / 270.0
-
-    # Contribución MSNF: lactosa (PM=342) ≈ 55% del MSNF; NaCl y minerales ≈ 8%
-    # NaCl disocia en 2 iones → factor 2 en depresión de Aw
-    lactosa_g  = msnf_g * 0.55
-    sal_g      = msnf_g * 0.08
-    n_lactosa  = lactosa_g / 342.0
-    n_sal      = sal_g / 58.44 * 2   # disociación iónica
-
-    n_solutos_total = n_azucares + n_lactosa + n_sal
-
-    # Ross simplificado: Aw ≈ n_agua / (n_agua + n_solutos)
-    # Equivalente a Raoult para soluciones ideales diluidas
-    aw = n_agua / (n_agua + n_solutos_total)
-    aw = max(0.0, min(1.0, aw))
-
-    # Clasificación de riesgo microbiológico
-    # Referencia: ICMSF (2002), Goff & Hartel (2013)
-    if aw < 0.85:
-        riesgo = 'bajo'
-        interpretacion = (
-            f"✅ Aw {aw:.3f} — actividad de agua muy baja. "
-            "Crecimiento microbiano inhibido para la mayoría de patógenos. "
-            "Estabilidad microbiológica excelente en almacenamiento congelado."
-        )
-    elif aw < 0.91:
-        riesgo = 'medio'
-        interpretacion = (
-            f"⚠️ Aw {aw:.3f} — zona intermedia. "
-            "Levaduras osmófilas pueden crecer si hay descongelación parcial. "
-            "Mantener cadena de frío estricta. "
-            "Considera añadir trehalosa (crioprotector) para mejorar estabilidad."
-        )
-    else:
-        riesgo = 'alto'
-        interpretacion = (
-            f"🔴 Aw {aw:.3f} — actividad de agua alta (mezcla muy diluida). "
-            "En la mezcla líquida antes de congelar, este nivel permite crecimiento "
-            "microbiano si hay contaminación post-proceso. "
-            "Normal para bases lácteas estándar — controlar pasteurización y tiempo "
-            "entre mezcla y congelación (máximo 2 horas a temperatura ambiente)."
-        )
-
-    return {
-        'aw':            round(aw, 4),
-        'aw_pct':        round(aw * 100, 2),
-        'riesgo_micro':  riesgo,
-        'interpretacion': interpretacion,
-        'modelo':        'Ross (1975)',
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FORMATO DE TICKET DE PRODUCCIÓN (T1)
-# Movido aquí desde app.py para ser testeable y reutilizable.
+# TICKET DE PRODUCCIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
 def format_production_ticket(
@@ -963,42 +997,19 @@ def format_production_ticket(
 ) -> str:
     """
     Genera el texto del ticket de producción.
-
-    Parámetros
-    ----------
-    recipe_name           : nombre de la receta
-    product_type          : tipo de producto (usar constantes de constants.py)
-    machine               : máquina (usar constantes de constants.py)
-    ingredient_names      : lista de nombres de ingredientes activos
-    lines_for_calculator  : lista de (ingredient_dict, grams, price_per_kg)
-    totals                : salida de calc_totals()
-    pct                   : salida de calc_percentages()
-    derived               : salida de calc_derived()
-    kcal                  : salida de calc_calories()
-    diags_excluir         : set de keys de diagnósticos a omitir (default: {'creami_overrun_hint'})
-
-    Retorna
-    -------
-    str  — texto plano listo para descargar o imprimir
     """
-    from datetime import datetime
-    from constants import DIAGS_EXCLUIR_TICKET, MACHINE_PACOJET
-
     if diags_excluir is None:
         diags_excluir = DIAGS_EXCLUIR_TICKET
 
-    # Líneas de ingredientes
     ing_lines = "\n".join(
         f"  {n:<38} {g:>7.1f} g"
         for (_, g, _), n in zip(lines_for_calculator, ingredient_names)
     )
 
-    # Semáforo
     def sym(k):
         s = derived.get("status", {}).get(k, "ok")
         return "✅" if s == "ok" else "🔺" if s == "high" else "🔻"
 
-    # Diagnósticos filtrados
     diags_activos = [
         d for d in derived.get("diagnostics", [])
         if d["key"] not in diags_excluir
@@ -1010,7 +1021,20 @@ def format_production_ticket(
             for d in diags_activos
         )
 
-    # Instrucciones por máquina
+    # Bloque de alcohol si fue detectado
+    alcohol_block = ""
+    alc = derived.get('alcohol_detected')
+    if alc:
+        alcohol_block = (
+            f"\nALCOHOL DETECTADO:\n"
+            f"  Etanol estimado: {alc['ethanol_total_g']:.1f} g "
+            f"({alc['ethanol_pct']:.2f}% de la mezcla)\n"
+            + "\n".join(
+                f"  · {a['ingredient_name']}: {a['ethanol_g']:.1f} g etanol"
+                for a in alc['lines']
+            )
+        )
+
     is_creami = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
     if is_creami:
         instrucciones = (
@@ -1054,6 +1078,7 @@ def format_production_ticket(
         f"  ΔT crioscopía:  {derived.get('delta_t', 0):.2f} °C\n"
         f"  kcal / 100 g:   {kcal['kcal_per_100g']:.0f} kcal\n"
         f"  Costo estimado: ${totals['cost']:.2f}\n"
+        f"{alcohol_block}"
         f"{diag_block}\n"
         f"{instrucciones}\n"
         "══════════════════════════════════════════════"
