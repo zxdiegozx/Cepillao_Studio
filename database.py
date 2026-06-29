@@ -1,4 +1,4 @@
-import sqlite3, os
+import sqlite3, os, json as _json
 from constants import MACHINE_CREAMI_DELUXE
 
 _vol    = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
@@ -73,28 +73,23 @@ MIGRATIONS = [
         "Añade flag zero_calorie a ingredientes"),
     (4, "ALTER TABLE recipes ADD COLUMN is_base INTEGER DEFAULT 0",
         "Añade flag is_base para distinguir bases de helado de recetas finales"),
-    # Migración 5: seed incremental.
-    # INSERT OR IGNORE respeta el UNIQUE en 'name': si ya existe, no toca nada.
-    # Para añadir más ingredientes en el futuro: agrega a DB_DATA y crea migración 6, 7...
     (5, "SELECT 1",
         "Seed incremental v1: 134 ingredientes estándar con categorias nuevas"),
-    (6, """CREATE TABLE IF NOT EXISTS user_config (
-        key        TEXT PRIMARY KEY NOT NULL,
-        value      TEXT NOT NULL DEFAULT '{}',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )""",
-    "Tabla user_config para persistir rangos personalizados por tipo/máquina")
+    (6,
+     """CREATE TABLE IF NOT EXISTS user_config (
+         key        TEXT PRIMARY KEY NOT NULL,
+         value      TEXT NOT NULL DEFAULT '{}',
+         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+     )""",
+     "Tabla user_config — rangos personalizados por tipo/máquina persistidos en BD"),
 ]
 
-# Versión de migración que dispara el seed incremental.
-# Sube este número (y crea la migración correspondiente) cada vez que amplíes DB_DATA.
 _SEED_MIGRATION_VERSION = 5
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BASE DE DATOS ESTÁNDAR
 # Columnas: name, category, fat, msnf, sugars, other_st, pod, pac, water,
 #           notes, function, brix, ph
-# Categorías alineadas con INGREDIENT_CATEGORIES en constants.py
 # ─────────────────────────────────────────────────────────────────────────────
 DB_DATA = [
 
@@ -153,63 +148,55 @@ DB_DATA = [
     # BASE VEGETAL
     # ══════════════════════════════════════════════════════════════════════════
     ("Leche de coco entera 17%",    "Base vegetal", 17.5,  0.0,  3.8,  1.5, 0.04, 0.05, 77.2,
-     "Ácido láurico, emulsión natural, aroma coco",         "Base gelato vegano",     0,  6.5),
-    ("Crema de coco 24%",           "Base vegetal", 24.0,  0.0,  4.0,  2.0, 0.04, 0.06, 70.0,
-     "Ultra-grasa vegetal, solidifica <25°C",               "Grasa vegana premium",   0,  6.5),
-    ("Leche de almendra",           "Base vegetal",  1.1,  0.0,  0.3,  0.5, 0.00, 0.01, 98.1,
-     "Baja en sólidos, requiere espesantes",                "Base vegana ligera",     0,  6.8),
-    ("Leche de avena",              "Base vegetal",  1.5,  0.0,  4.5,  1.0, 0.05, 0.07, 93.0,
-     "β-glucanos, POD moderado, cremosa",                   "Base vegana cremosa",    0,  6.5),
-    ("Leche de soya",               "Base vegetal",  1.8,  0.0,  1.0,  3.5, 0.01, 0.02, 93.7,
-     "Proteína 3.5%, emulsión natural",                     "Base vegana proteica",   0,  6.8),
-    ("Agua destilada",              "Base vegetal",  0.0,  0.0,  0.0,  0.0, 0.00, 0.00,100.0,
-     "Diluyente neutro puro",                               "Dilución, ajuste",       0,  7.0),
-    ("Agua de coco natural",        "Base vegetal",  0.2,  0.0,  6.0,  0.5, 0.06, 0.08, 93.3,
-     "Electrolitos, sabor suave, Brix 5-7°",               "Base refrescante",       6,  4.7),
+     "Ácido láurico, emulsión natural estable, cremosa",    "Base vegana grasa",      0,  6.5),
+    ("Leche de coco light 5%",      "Base vegetal",  5.0,  0.0,  3.5,  0.8, 0.04, 0.05, 90.7,
+     "Reducida en grasa, textura más ligera",               "Base vegana light",      0,  6.5),
+    ("Crema de coco 24%",           "Base vegetal", 24.0,  0.0,  4.0,  1.5, 0.04, 0.05, 70.5,
+     "Más concentrada, baja agua",                          "Grasa vegana alta",      0,  6.5),
+    ("Leche de almendra sin azúcar","Base vegetal",  1.1,  0.0,  0.2,  0.5, 0.00, 0.00, 98.2,
+     "Muy baja en calorías y sólidos, agua principalmente", "Base vegana neutra",     0,  7.0),
+    ("Leche de avena",              "Base vegetal",  1.5,  0.0,  4.5,  6.5, 0.05, 0.07, 87.5,
+     "Beta-glucanos, textura cremosa natural, almidón",     "Base vegana cremosa",    0,  6.8),
+    ("Leche de soja",               "Base vegetal",  1.8,  0.0,  1.2,  3.5, 0.01, 0.02, 93.5,
+     "Proteína 3.5%, isoflavonas, sabor neutro",            "Proteína vegana",        0,  7.0),
+    ("Leche de macadamia",          "Base vegetal",  4.5,  0.0,  1.0,  1.0, 0.01, 0.01, 93.5,
+     "Grasa monoinsaturada, sabor suave premium",           "Base vegana premium",    0,  7.0),
+    ("Crema de avena (barista)",    "Base vegetal",  3.0,  0.0,  7.0,  8.0, 0.07, 0.09, 82.0,
+     "Formulada para espumar, más estable que leche avena", "Textura barista vegana", 0,  6.8),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # FRUTA — TROPICAL
+    # FRUTA TROPICAL (Venezuela/LatAm)
     # ══════════════════════════════════════════════════════════════════════════
-    ("Mango Tommy (pulpa)",         "Fruta",  0.4,  0.0, 15.0,  0.8, 0.15, 0.21, 83.8,
-     "Brix 16-20°, pH 3.5-4.2, variedad común Venezuela",  "Sorbete tropical",      18,  3.8),
-    ("Mango de hilacha (pulpa)",    "Fruta",  0.3,  0.0, 17.0,  1.0, 0.17, 0.23, 81.7,
-     "Muy dulce, fibroso → tamizar bien",                   "Sorbete intenso",       18,  3.9),
-    ("Maracuyá (pulpa c/semilla)",  "Fruta",  0.7,  0.0, 11.5,  1.5, 0.12, 0.17, 86.3,
-     "Brix 14-16°, pH 2.8-3.2, ácido fuerte",              "Acidez + aroma",        15,  3.0),
-    ("Maracuyá (jugo filtrado)",    "Fruta",  0.4,  0.0, 12.0,  0.5, 0.12, 0.17, 87.1,
-     "Sin semillas, más limpio, pH 2.8",                    "Sorbete limpio",        13,  2.9),
-    ("Guanábana (pulpa)",           "Fruta",  0.3,  0.0, 13.5,  3.5, 0.14, 0.16, 82.7,
-     "Fibra 3.5%, pH 3.5, textura untuosa",                 "Sorbete cremoso vegano",14,  3.5),
-    ("Piña golden (pulpa)",         "Fruta",  0.2,  0.0, 16.0,  0.7, 0.16, 0.22, 83.1,
-     "Bromelina activa → inactiva al cocinar, pH 3.5",      "Sorbete refrescante",   15,  3.5),
-    ("Cambur/Banana madura",        "Fruta",  0.3,  0.0, 17.0,  2.8, 0.17, 0.22, 79.9,
-     "Almidón→azúcar en madurez, pectina alta",             "Cuerpo, dulzor natural",18,  4.8),
-    ("Lechosa/Papaya (pulpa)",      "Fruta",  0.3,  0.0,  8.3,  0.9, 0.08, 0.11, 90.5,
-     "Papaína activa → inactivar con calor, β-caroteno",    "Sorbete suave",          9,  5.8),
-    ("Aguacate (pulpa)",            "Fruta",  15.0, 0.0,  0.7,  3.0, 0.01, 0.01, 81.3,
-     "66% MG monoinsaturada, cremosidad única",             "Base vegana untuosa",    0,  6.3),
+    ("Mango (pulpa fresca)",        "Fruta",  0.4,  0.0, 14.8,  0.7, 0.15, 0.21, 84.1,
+     "Brix 14-18°, β-caroteno, pH 3.4-4.8",                "Sorbete tropical",      16,  3.9),
+    ("Maracuyá (pulpa con semilla)","Fruta",  0.7,  0.0, 11.2,  1.5, 0.11, 0.16, 86.6,
+     "pH 2.8-3.5, muy ácido, passiflora, antioxidantes",   "Sorbete intenso",       11,  3.0),
     ("Parchita/Fruta de la pasión", "Fruta",  0.4,  0.0, 11.0,  1.8, 0.11, 0.16, 86.8,
      "Igual que maracuyá, nombre local venezolano",         "Acidez + aroma",        13,  3.0),
     ("Guayaba (pulpa)",             "Fruta",  0.9,  0.0,  9.0,  5.5, 0.09, 0.13, 84.6,
      "Pectina muy alta, pH 3.5-4.0, licopeno",              "Sorbete con cuerpo",    10,  3.7),
+    ("Piña (pulpa fresca)",         "Fruta",  0.1,  0.0, 10.5,  0.5, 0.11, 0.15, 88.9,
+     "Bromelina → inactivar a 70°C, pH 3.2-4.0",           "Sorbete cítrico dulce", 12,  3.5),
+    ("Cambur/Banana (maduro)",      "Fruta",  0.3,  0.0, 22.8,  2.6, 0.23, 0.32, 74.3,
+     "Almidón resistente madurado en azúcar, POD alto",     "Cuerpo, dulzor natural",25,  4.6),
+    ("Papaya/Lechosa (pulpa)",      "Fruta",  0.3,  0.0,  8.3,  0.9, 0.08, 0.11, 90.5,
+     "Papaína activa → inactivar con calor, β-caroteno",    "Sorbete suave",          9,  5.8),
+    ("Aguacate (pulpa)",            "Fruta",  15.0, 0.0,  0.7,  3.0, 0.01, 0.01, 81.3,
+     "66% MG monoinsaturada, cremosidad única",             "Base vegana untuosa",    0,  6.3),
     ("Tamarindo (pulpa)",           "Fruta",  0.6,  0.0, 38.0,  5.5, 0.38, 0.55, 55.9,
      "Muy concentrado, ácido tartárico, azúcar alta",       "Sorbete agridulce",     55,  3.0),
     ("Lulo (pulpa)",                "Fruta",  0.1,  0.0,  4.5,  0.5, 0.05, 0.07, 94.9,
      "pH 2.5-3.0, muy ácido, aroma único andino",           "Sorbete intenso ácido", 5,   2.8),
     ("Carambola (pulpa)",           "Fruta",  0.3,  0.0,  7.1,  0.4, 0.07, 0.10, 92.2,
      "Ácido oxálico, pH 3.0-4.0, apariencia estrella",      "Sorbete tropical raro", 7,   3.5),
-    ("Mango (enlatado en almíbar)", "Fruta",  0.2,  0.0, 23.0,  0.5, 0.23, 0.32, 76.3,
-     "Almíbar añadido, Brix 18-22°, pasteurizado",          "Sorbete sin temporada", 22,  3.8),
-    ("Durazno (enlatado en almíbar)","Fruta", 0.1,  0.0, 18.0,  0.3, 0.18, 0.25, 81.6,
-     "Almíbar ligero, consistente todo el año",             "Sorbete clásico",       18,  3.9),
-    ("Piña (enlatada en jugo)",     "Fruta",  0.1,  0.0, 14.0,  0.5, 0.14, 0.19, 85.4,
-     "Sin almíbar extra, bromelina inactiva por proceso",   "Sorbete conveniente",   14,  3.6),
-    ("Cereza maraschino (enlatada)","Fruta",  0.3,  0.0, 28.0,  0.3, 0.28, 0.39, 71.4,
-     "Alta azúcar añadida, uso como inclusion o swirl",     "Decoration / inclusion",28,  3.5),
     ("Coco rallado seco",           "Fruta",  64.0, 0.0,  6.5,  9.0, 0.07, 0.07, 20.5,
      "Grasa saturada laurica, fibra 9%",                    "Textura, sabor coco",   0,   6.5),
+    ("Mango (enlatado en almíbar)", "Fruta",  0.2,  0.0, 23.0,  0.5, 0.23, 0.32, 76.3,
+     "Almíbar añadido, Brix 18-22°, pasteurizado",          "Sorbete sin temporada", 22,  3.8),
+    ("Piña (enlatada en jugo)",     "Fruta",  0.1,  0.0, 14.0,  0.5, 0.14, 0.19, 85.4,
+     "Sin almíbar extra, bromelina inactiva por proceso",   "Sorbete conveniente",   14,  3.6),
 
-    # ── Fruta europea/templada ────────────────────────────────────────────────
+    # ── Fruta templada/europea ─────────────────────────────────────────────────
     ("Fresa (pulpa)",               "Fruta",  0.3,  0.0,  7.7,  0.5, 0.08, 0.11, 91.5,
      "Antocianos, pH 3.0-3.5, Brix 8-11°",                 "Sorbete clásico",        9,  3.2),
     ("Frambuesa (pulpa)",           "Fruta",  0.7,  0.0,  5.4,  2.8, 0.05, 0.07, 91.1,
@@ -224,6 +211,10 @@ DB_DATA = [
      "pH 3.5-4.0, hesperidina",                             "Sorbete cítrico",       11,  3.7),
     ("Durazno/Melocotón (fresco)",  "Fruta",  0.3,  0.0,  9.5,  0.8, 0.10, 0.13, 89.4,
      "Ácido málico, β-caroteno",                            "Sorbete aromático",     10,  3.7),
+    ("Durazno (enlatado en almíbar)","Fruta", 0.1,  0.0, 18.0,  0.3, 0.18, 0.25, 81.6,
+     "Almíbar ligero, consistente todo el año",             "Sorbete clásico",       18,  3.9),
+    ("Cereza maraschino (enlatada)","Fruta",  0.3,  0.0, 28.0,  0.3, 0.28, 0.39, 71.4,
+     "Alta azúcar añadida, uso como inclusion o swirl",     "Decoration / inclusion",28,  3.5),
 
     # ══════════════════════════════════════════════════════════════════════════
     # DULCIFICANTE
@@ -368,37 +359,21 @@ DB_DATA = [
      "Oleico+linoleico, proteína 25%, sal variable",         "Gelato/sorbete maní",    0,  6.5),
     ("Crema de pistacho (azucarada)","Saborizante", 32.0, 0.0, 28.0, 18.0, 0.28, 0.28, 22.0,
      "Pasta+azúcar+leche, lista para usar, POD significativo","Gelato pistacchio fácil",0, 6.5),
-    ("Praliné de avellana",         "Saborizante",  40.0, 0.0, 40.0, 12.0, 0.40, 0.40,  8.0,
-     "Avellana+caramelo molido, 50/50 grasa/azúcar aprox",   "Gelato praliné",         0,  5.5),
-    ("Extracto de vainilla 2x",     "Saborizante",   0.0, 0.0,  0.0,  5.0, 0.00, 0.00, 95.0,
-     "200+ aromáticos, vainillina, dosis 3-8g/kg",           "Aroma base universal",   0,  5.5),
-    ("Vaina de vainilla (raspado)",  "Saborizante",  0.0, 0.0,  0.0,  8.0, 0.00, 0.00, 92.0,
-     "Vainillina + aromáticos complejos, 1 vaina ≈ 5ml extracto","Premium aroma",      0,  5.5),
-    ("Café espresso (líquido)",     "Saborizante",   0.0, 0.0,  0.5,  1.5, 0.01, 0.01, 98.0,
-     "Clorogénico, cafeína, pH 5.0, dosis 50-100g/kg",      "Sabor café",             0,  5.0),
-    ("Té matcha ceremonial",        "Saborizante",   5.3, 0.0,  0.0, 60.0, 0.00, 0.00, 34.7,
-     "L-teanina, catequinas, clorofila, dosis 10-20g/kg",    "Gelato matcha",          0,  6.0),
-    ("Canela en polvo",             "Saborizante",   1.2, 0.0,  2.2, 80.0, 0.02, 0.02, 10.0,
-     "Cinamaldehído, trazas anticoagulante, dosis 1-3g/kg", "Aroma especiado",        0,  6.0),
-    ("Cardamomo molido",            "Saborizante",   6.7, 0.0,  0.0, 60.0, 0.00, 0.00, 20.0,
-     "Aceite esencial cineol, muy potente, dosis <1g/kg",    "Aroma floral especiado", 0,  6.0),
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # INCLUSION
-    # ══════════════════════════════════════════════════════════════════════════
-    ("Nueces picadas",              "Inclusion",    65.0, 0.0,  3.5, 14.0, 0.04, 0.04, 13.5,
-     "Omega-3, tostadas potencian sabor",                    "Textura crujiente",      0,  6.5),
-    ("Almendras fileteadas",        "Inclusion",    49.0, 0.0,  4.3, 20.0, 0.04, 0.04, 20.0,
-     "Monoinsaturadas, tostadas o crudas",                   "Textura, sabor",         0,  6.5),
-    ("Granola (mix estándar)",      "Inclusion",    11.0, 0.0, 28.0, 40.0, 0.28, 0.28, 10.0,
-     "Avena+miel+aceite, variado en azúcar",                 "Textura crujiente swirl",0,  6.0),
-    ("Dulce de leche",              "Inclusion",     7.5, 8.0, 45.0,  2.0, 0.45, 0.45, 37.5,
-     "Maillard de leche+azúcar, POD~0.45",                   "Swirl, saborizante",     0,  6.5),
-    ("Mermelada de fresa",          "Inclusion",     0.0, 0.0, 55.0,  1.5, 0.55, 0.77, 43.5,
-     "Pectina HM, Brix 60-65°, swirl o ripple",              "Swirl frutal",          62,  3.2),
-    ("Galleta tipo Oreo (triturada)","Inclusion",   21.0, 0.0, 48.0, 15.0, 0.48, 0.48, 16.0,
-     "Cacao alcalinizado+azúcar+grasa",                      "Mix-in clásico",         0,  7.0),
-    ("Caramelo líquido (salted)",   "Inclusion",     5.0, 0.0, 75.0,  0.5, 0.75, 1.05, 19.5,
+    ("Praliné de avellana",         "Saborizante",  40.0, 0.0, 38.0,  8.0, 0.38, 0.38, 14.0,
+     "Pasta+caramelo, intensidad y color dorado",            "Gelato pralinato",       0,  6.5),
+    ("Extracto de vainilla (puro)", "Saborizante",   0.0, 0.0,  5.0,  5.0, 0.05, 0.05, 60.0,
+     "Vainillina natural, dosis 2-5g/kg, alcohol 35%",       "Aroma clásico",          0,  7.0),
+    ("Pasta de vainilla",           "Saborizante",   0.0, 0.0, 40.0, 15.0, 0.40, 0.40, 45.0,
+     "Semillas de vainilla, más estable que extracto",       "Vainilla intensa",       0,  7.0),
+    ("Café espresso (concentrado)", "Saborizante",   0.2, 0.0,  1.5,  4.5, 0.02, 0.02, 93.8,
+     "60ml espresso doble, cafeína, pH 5.0",                 "Gelato café",            0,  5.0),
+    ("Café soluble (polvo)",        "Saborizante",   0.0, 0.0,  0.0, 99.0, 0.00, 0.00,  1.0,
+     "Dosis 10-20g/kg, soluble en frío",                     "Sabor café concentrado", 0,  5.0),
+    ("Matcha en polvo (ceremonial)","Saborizante",   5.0, 0.0,  0.0, 80.0, 0.00, 0.00, 15.0,
+     "L-teanina, clorofila, astringente → limitar dosis",    "Gelato japonés",         0,  7.0),
+    ("Canela en polvo",             "Saborizante",   1.2, 0.0,  1.0, 85.0, 0.00, 0.00, 12.8,
+     "Cinamaldehído, dosis 0.5-2g/kg, nota cálida",          "Aroma especiado",        0,  7.0),
+    ("Dulce de leche",              "Saborizante",   5.0, 0.0, 75.0,  5.0, 0.75, 1.05, 19.5,
      "Maillard de sacarosa+crema+sal",                       "Swirl caramelo",        70,  5.0),
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -459,10 +434,6 @@ def init_db():
                 conn.commit()
 
     # ── Seed incremental ─────────────────────────────────────────────────────
-    # Se ejecuta siempre que la migración _SEED_MIGRATION_VERSION esté aplicada.
-    # INSERT OR IGNORE: inserta solo ingredientes cuyo nombre no exista todavía.
-    # Esto garantiza que los nuevos ingredientes del DB_DATA llegan a bases de datos
-    # existentes (ya con datos), sin tocar ningún ingrediente personalizado del usuario.
     seed_applied = _SEED_MIGRATION_VERSION in {
         row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
     }
@@ -615,7 +586,6 @@ def get_bases_as_ingredients():
     """
     Retorna las bases de helado guardadas formateadas como ingredientes,
     para que puedan usarse directamente en el formulador como ingrediente compuesto.
-    Calcula fat/msnf/sugars/water/pod/pac desde sus líneas constituyentes.
     """
     conn = get_connection()
     bases = conn.execute("SELECT * FROM recipes WHERE is_base=1").fetchall()
@@ -626,7 +596,6 @@ def get_bases_as_ingredients():
             "SELECT * FROM recipe_lines WHERE recipe_id=?", (bid,)
         ).fetchall()
 
-        # Reconstruir totales desde líneas
         totals = dict(grams=0, fat=0, msnf=0, sugars=0, other_st=0,
                       pod=0, pac=0, water=0)
         for line in lines:
@@ -673,26 +642,14 @@ def get_bases_as_ingredients():
     return result
 
 
-if __name__ == "__main__":
-    init_db()
-    print("DB initialized:", DB_PATH)
-    ings = get_all_ingredients()
-    print(f"Ingredientes: {len(ings)}")
-    bases = get_all_recipes(bases_only=True)
-    print(f"Bases de helado: {len(bases)}")
-
 # ─────────────────────────────────────────────────────────────────────────────
-# CONFIGURACIÓN DE USUARIO
-# Persiste los rangos objetivo personalizados (config_params en session_state)
-# en SQLite para que sobrevivan reinicios de Railway y cierres de navegador.
-# key   = "{product_type}_{machine}"  ej: "Helado/Gelato_Ninja Creami Deluxe"
-# value = JSON string del dict de rangos  ej: '{"st": [28, 38], "fat": [4, 15], ...}'
+# CONFIGURACIÓN DE USUARIO  (REC 1 — persistencia config_params en BD)
+# key   = "{product_type}_{machine}"
+# value = JSON del dict de rangos personalizados
 # ─────────────────────────────────────────────────────────────────────────────
-
-import json as _json
 
 def get_user_config() -> dict:
-    """Carga toda la configuración guardada. Retorna dict {key: dict_de_rangos}."""
+    """Carga toda la config guardada. Retorna {} si la tabla no existe aún."""
     try:
         conn = get_connection()
         rows = conn.execute("SELECT key, value FROM user_config").fetchall()
@@ -702,14 +659,14 @@ def get_user_config() -> dict:
             try:
                 result[row["key"]] = _json.loads(row["value"])
             except Exception:
-                pass  # fila corrupta → ignorar
+                pass
         return result
     except Exception:
         return {}
 
 
 def set_user_config(key: str, value: dict) -> None:
-    """Guarda o actualiza un rango personalizado para la combinación tipo/máquina."""
+    """Guarda o actualiza un rango personalizado (UPSERT)."""
     try:
         conn = get_connection()
         conn.execute(
@@ -735,3 +692,16 @@ def delete_user_config(key: str) -> None:
         conn.close()
     except Exception:
         pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    init_db()
+    print("DB initialized:", DB_PATH)
+    ings = get_all_ingredients()
+    print(f"Ingredientes: {len(ings)}")
+    bases = get_all_recipes(bases_only=True)
+    print(f"Bases de helado: {len(bases)}")
