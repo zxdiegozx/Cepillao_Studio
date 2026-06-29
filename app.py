@@ -1,19 +1,28 @@
 import streamlit as st
 import calculator as calc
+from constants import (
+    PRODUCT_TYPES, MACHINES,
+    MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD,
+    DIAGS_EXCLUIR_TICKET,
+)
 
 try:
     import database as db
     db.init_db()
-    ingredients_raw = db.get_all_ingredients()
 except Exception as e:
     st.error(f"Error de base de datos: {e}")
-    ingredients_raw = []
 
+# T2: cachear ingredientes — evita query en cada rerender de Streamlit
+@st.cache_data(ttl=300)
+def _load_ingredients():
+    try:
+        return db.get_all_ingredients()
+    except Exception:
+        return []
+
+ingredients_raw  = _load_ingredients()
 ingredients_map  = {ing['name']: ing for ing in ingredients_raw}
 ingredient_names = list(ingredients_map.keys())
-
-# FIX B5: diagnósticos excluidos del ticket de producción (consistente con la UI)
-DIAGS_EXCLUIR_TICKET = {"creami_overrun_hint"}
 
 # ── Configuración de página ────────────────────────────────────────────────────
 st.set_page_config(
@@ -69,17 +78,13 @@ with tab_form:
         placeholder="Ej: Choco Creami v3"
     )
 
-    product_type = st.sidebar.selectbox(
-        "Tipo de Producto",
-        ["Helado/Gelato", "Sorbete", "Granita", "Gelato Vegano", "Frozen Yogurt", "Helado Ligero"]
+    product_type = st.sidebar.selectbox("Tipo de Producto", PRODUCT_TYPES)
+    machine      = st.sidebar.selectbox("Maquinaria", MACHINES, index=0)
+    overrun_pct   = st.sidebar.number_input(
+        "Overrun (%)", 0, 120,
+        45 if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD) else 30,
+        step=5
     )
-    machine = st.sidebar.selectbox(
-        "Maquinaria",
-        ["Ninja Creami Deluxe", "Ninja Creami Standard", "Pacojet", "Mantecadora Tradicional"],
-        index=0
-    )
-    overrun_pct   = st.sidebar.number_input("Overrun (%)", 0, 120,
-                                             45 if "Creami" in machine else 30, step=5)
     target_liters = st.sidebar.number_input("Litros objetivo", 0.1, 50.0, 1.0, step=0.5)
 
     st.sidebar.divider()
@@ -243,8 +248,8 @@ with tab_form:
             m2.metric("Costo est.",  f"${totals['cost']:.2f}")
 
             # Llenado del pote Creami
-            if "Creami" in machine:
-                cap = 640 if "Deluxe" in machine else 430
+            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
+                cap = 640 if machine == MACHINE_CREAMI_DELUXE else 430
                 masa = totals["grams"]
                 pct_pote = min(masa / cap * 100, 110)
                 if 540 <= masa <= cap:
@@ -260,7 +265,7 @@ with tab_form:
             k1, k2 = st.columns(2)
             k1.metric("/ 100 g",        f"{kcal['kcal_per_100g']:.0f} kcal")
             k2.metric("/ porción 120g", f"{kcal['kcal_per_100g'] * 1.2:.0f} kcal")
-            if "Creami" in machine:
+            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
                 st.caption(f"Pote completo: **{kcal['kcal_per_pote_deluxe']:.0f} kcal**")
 
             # Composición
@@ -298,7 +303,7 @@ with tab_form:
             st.write("### ❄️ Crioscopía")
             dt = derived.get("delta_t", 0)
             st.info(f"**ΔT:** {dt:.2f} °C")
-            if "Creami" in machine:
+            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
                 if derived.get("congela_ok"):
                     st.success("✅ Congela correctamente a −18 °C")
                 else:
@@ -310,8 +315,8 @@ with tab_form:
             # Overrun
             st.write("### 📐 Overrun")
             or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
-            if "Creami" in machine:
-                cap_label = "24oz" if "Deluxe" in machine else "16oz"
+            if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
+                cap_label = "24oz" if machine == MACHINE_CREAMI_DELUXE else "16oz"
                 o1, o2 = st.columns(2)
                 o1.metric(f"Potes Creami {cap_label}", f"{or_d['potes_total']:.1f}")
                 o2.metric("Masa/pote",                 f"{or_d['masa_por_pote_g']:.0f} g")
@@ -339,70 +344,21 @@ with tab_form:
                     with st.expander(f"{icon} {d['title']}"):
                         st.write(d["tip"])
 
-            # Exportar ticket
+            # Exportar ticket — T1: delegado a calc.format_production_ticket()
             st.divider()
-            def generar_ticket():
-                from datetime import datetime
-                ing_lines = "\n".join(
-                    f"  {n:<38} {g:>7.1f} g"
-                    for (_, g, _), n in zip(lines_for_calculator, active_ingredient_names)
-                )
-                sym = lambda k: "✅" if derived["status"].get(k) == "ok" else \
-                                "🔺" if derived["status"].get(k) == "high" else "🔻"
-
-                # FIX B5: excluir overrun_hint del ticket (igual que en la UI)
-                diags_ticket = [d for d in derived.get("diagnostics", [])
-                                if d["key"] not in DIAGS_EXCLUIR_TICKET]
-                diag_lines = ""
-                if diags_ticket:
-                    diag_lines = "\nDIAGNÓSTICOS:\n" + "\n".join(
-                        f"  [{d['priority'].upper()}] {d['title']}"
-                        for d in diags_ticket
-                    )
-
-                inst = ""
-                if "Creami" in machine:
-                    inst = ("INSTRUCCIONES NINJA CREAMI:\n"
-                            "  → Congelar 24 h a −18 °C mínimo\n"
-                            "  → Procesar función \"Ice Cream\"\n"
-                            "  → Si granuloso: respin sin añadir líquido\n"
-                            "  → Si muy duro: templar 3-5 min y reintentar")
-                elif "Pacojet" in machine:
-                    inst = ("INSTRUCCIONES PACOJET:\n"
-                            "  → Verter en beaker, congelar 24 h a −22 °C\n"
-                            "  → Pacotizar sin descongelar")
-
-                return f"""
-══════════════════════════════════════════════
-🧊  CEPILLAO' GELATO STUDIO — TICKET DE PRODUCCIÓN
-══════════════════════════════════════════════
-Receta:    {recipe_name_input or '—'}
-Tipo:      {product_type}
-Máquina:   {machine}
-Fecha:     {datetime.now().strftime('%d/%m/%Y  %H:%M')}
-
-INGREDIENTES:
-{ing_lines}
-
-PARÁMETROS:
-  Masa total:     {totals['grams']:.1f} g
-  ST:             {pct.get('st_pct', 0):.1f}%   {sym('st')}
-  Grasa:          {pct.get('fat_pct', 0):.1f}%   {sym('fat')}
-  MSNF:           {pct.get('msnf_pct', 0):.1f}%   {sym('msnf')}
-  Azúcares:       {pct.get('sugars_pct', 0):.1f}%   {sym('sugars')}
-  Agua libre:     {pct.get('water_pct', 0):.1f}%   {sym('water')}
-  POD:            {pct.get('pod_total', 0):.0f}      {sym('pod')}
-  PAC:            {pct.get('pac_total', 0):.0f}      {sym('pac')}
-  ΔT crioscopía:  {derived.get('delta_t', 0):.2f} °C
-  kcal / 100 g:   {kcal['kcal_per_100g']:.0f} kcal
-  Costo estimado: ${totals['cost']:.2f}
-{diag_lines}
-{inst}
-══════════════════════════════════════════════"""
-
             st.download_button(
                 "⬇️ Descargar ticket (.txt)",
-                data=generar_ticket().encode("utf-8"),
+                data=calc.format_production_ticket(
+                    recipe_name=recipe_name_input,
+                    product_type=product_type,
+                    machine=machine,
+                    ingredient_names=active_ingredient_names,
+                    lines_for_calculator=lines_for_calculator,
+                    totals=totals,
+                    pct=pct,
+                    derived=derived,
+                    kcal=kcal,
+                ).encode("utf-8"),
                 file_name="ticket_produccion.txt",
                 mime="text/plain",
                 use_container_width=True
