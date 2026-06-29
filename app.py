@@ -20,15 +20,25 @@ try:
 except Exception as e:
     st.error(f"Error de base de datos: {e}")
 
-# T2: cachear ingredientes — evita query en cada rerender de Streamlit
+# MEJORA: cache con clave de versión para invalidación explícita.
+# Al guardar o eliminar un ingrediente se incrementa _ing_cache_version,
+# lo que genera un cache miss inmediato sin esperar el TTL de 300 s.
+if "ing_cache_version" not in st.session_state:
+    st.session_state.ing_cache_version = 0
+
 @st.cache_data(ttl=300)
-def _load_ingredients():
+def _load_ingredients(version: int):
+    """version es solo una clave de cache — cambiarla invalida el resultado."""
     try:
         return db.get_all_ingredients()
     except Exception:
         return []
 
-ingredients_raw  = _load_ingredients()
+def _invalidate_ingredient_cache():
+    """Llama esto tras cualquier write a la BD de ingredientes."""
+    st.session_state.ing_cache_version += 1
+
+ingredients_raw  = _load_ingredients(st.session_state.ing_cache_version)
 ingredients_map  = {ing['name']: ing for ing in ingredients_raw}
 ingredient_names = list(ingredients_map.keys())
 
@@ -42,7 +52,6 @@ div[data-testid="stMetricValue"] { font-size: 20px; font-weight: bold; }
 st.title("🍦 Cepillao' Gelato Studio")
 st.caption("Ninja Creami Edition · Formulador artesanal de helados")
 
-# ── Tabs principales ──────────────────────────────────────────────────────────
 tab_form, tab_recetas, tab_ingredientes = st.tabs([
     "🧪 Formulador",
     "📁 Mis Recetas",
@@ -55,7 +64,6 @@ tab_form, tab_recetas, tab_ingredientes = st.tabs([
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_form:
 
-    # ── Callbacks ─────────────────────────────────────────────────────────────
     def callback_add_row():
         st.session_state.num_rows += 1
 
@@ -90,7 +98,6 @@ with tab_form:
 
     st.sidebar.divider()
 
-    # Botón guardar receta
     def guardar_receta():
         nombre = recipe_name_input.strip()
         if not nombre:
@@ -107,13 +114,13 @@ with tab_form:
             st.sidebar.error("Añade al menos un ingrediente con gramos.")
             return
         data = {
-            "name":         nombre,
-            "product_type": product_type,
-            "machine":      machine,
-            "base_grams":   sum(l["grams"] for l in lines),
-            "notes":        "",
-            "tasting_notes":"",
-            "lines":        lines,
+            "name":          nombre,
+            "product_type":  product_type,
+            "machine":       machine,
+            "base_grams":    sum(l["grams"] for l in lines),
+            "notes":         "",
+            "tasting_notes": "",
+            "lines":         lines,
         }
         if st.session_state.get("recipe_loaded_id"):
             data["id"] = st.session_state["recipe_loaded_id"]
@@ -124,6 +131,15 @@ with tab_form:
 
     st.sidebar.button("💾 Guardar receta", use_container_width=True,
                       on_click=guardar_receta)
+
+    # ── Validación Brix (sidebar opcional) ───────────────────────────────────
+    st.sidebar.divider()
+    with st.sidebar.expander("🔭 Validar Brix (refractómetro)"):
+        brix_medido = st.number_input(
+            "°Brix medido", min_value=0.0, max_value=80.0, value=0.0,
+            step=0.5, key="brix_medido_input",
+            help="Lectura directa del refractómetro sobre la mezcla homogénea"
+        )
 
     # ── Layout formulador ──────────────────────────────────────────────────────
     col_tabla, col_panel = st.columns([5, 3], gap="large")
@@ -157,15 +173,27 @@ with tab_form:
                 key=f"grams_{i}", label_visibility="collapsed"
             )
 
-            default_price = 0.0
-            if chosen_name != "-- Seleccionar ingrediente --":
-                default_price = float(
-                    ingredients_map.get(chosen_name, {}).get("price_per_kg", 0) or 0
-                )
+            # MEJORA: precio se actualiza cuando cambia el ingrediente seleccionado.
+            # Usamos una clave de "precio sugerido" separada del widget para
+            # poder forzar el valor sin violar la restricción de Streamlit sobre
+            # modificar widgets ya renderizados.
+            price_key = f"price_{i}"
+            ing_data  = ingredients_map.get(chosen_name, {})
+            suggested = float(ing_data.get("price_per_kg", 0) or 0)
+
+            # Si el ingrediente acaba de cambiar respecto al render anterior,
+            # sincronizamos el precio sugerido en session_state antes de
+            # que el widget lo lea.
+            prev_name_key = f"_prev_ing_name_{i}"
+            prev_name     = st.session_state.get(prev_name_key)
+            if prev_name != chosen_name:
+                # Solo sobreescribimos si el ingrediente cambió
+                st.session_state[price_key] = suggested
+                st.session_state[prev_name_key] = chosen_name
 
             price = c3.number_input(
-                f"Precio {i}", min_value=0.0, value=default_price, step=0.5,
-                key=f"price_{i}", label_visibility="collapsed"
+                f"Precio {i}", min_value=0.0, step=0.5,
+                key=price_key, label_visibility="collapsed"
             )
 
             if chosen_name != "-- Seleccionar ingrediente --" and grams > 0:
@@ -224,7 +252,6 @@ with tab_form:
 
         if not lines_for_calculator:
             st.info("👋 Selecciona ingredientes y gramos para ver el análisis.")
-
             if "Creami" in machine:
                 st.markdown("""
 | Parámetro | Ninja Creami |
@@ -240,17 +267,24 @@ with tab_form:
         else:
             totals  = calc.calc_totals(lines_for_calculator)
             pct     = calc.calc_percentages(totals)
-            derived = calc.calc_derived(totals, pct, product_type=product_type, machine=machine)
-            kcal    = calc.calc_calories(totals)
+            # MEJORA: calc_derived recibe lines_with_ings para detección real de alcohol
+            derived = calc.calc_derived(
+                totals, pct,
+                product_type=product_type,
+                machine=machine,
+                lines_with_ings=lines_for_calculator
+            )
+            # MEJORA: calc_calories recibe lines_with_ings para descontar zero_calorie
+            kcal = calc.calc_calories(totals, lines_for_calculator)
 
             # Métricas
             m1, m2 = st.columns(2)
-            m1.metric("Masa total",  f"{totals['grams']:.1f} g")
-            m2.metric("Costo est.",  f"${totals['cost']:.2f}")
+            m1.metric("Masa total", f"{totals['grams']:.1f} g")
+            m2.metric("Costo est.", f"${totals['cost']:.2f}")
 
             # Llenado del pote Creami
             if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
-                cap = 640 if machine == MACHINE_CREAMI_DELUXE else 430
+                cap  = 640 if machine == MACHINE_CREAMI_DELUXE else 430
                 masa = totals["grams"]
                 pct_pote = min(masa / cap * 100, 110)
                 if 540 <= masa <= cap:
@@ -300,10 +334,23 @@ with tab_form:
             st.write(f"- **PAC:** {pac_v:.0f} {'✅' if pac_s=='ok' else '🔺' if pac_s=='high' else '🔻'}")
             st.write(f"- **ST/Agua:** {derived.get('ratio_st_water', 0):.3f}")
 
+            # Alcohol detectado
+            alc = derived.get("alcohol_detected")
+            if alc:
+                st.write("### 🍷 Alcohol")
+                pct_etanol = alc['ethanol_pct']
+                color = "🔴" if pct_etanol > 4 else "🟡" if pct_etanol > 2.5 else "🟢"
+                st.write(f"{color} Etanol estimado: **{alc['ethanol_total_g']:.1f} g** "
+                         f"({pct_etanol:.2f}% de la mezcla)")
+                for a in alc['lines']:
+                    st.caption(f"· {a['ingredient_name']}: {a['ethanol_g']:.1f} g etanol "
+                               f"({a['ethanol_fraction']*100:.0f}% vol equiv.)")
+
             # Crioscopía
             st.write("### ❄️ Crioscopía")
             dt = derived.get("delta_t", 0)
-            st.info(f"**ΔT:** {dt:.2f} °C")
+            model = derived.get("cryoscopy_model", "")
+            st.info(f"**ΔT:** {dt:.2f} °C  _{model}_")
             if machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD):
                 if derived.get("congela_ok"):
                     st.success("✅ Congela correctamente a −18 °C")
@@ -312,6 +359,33 @@ with tab_form:
             ts = derived.get("temp_servicio", "")
             if ts:
                 st.caption(f"🌡️ {ts}")
+
+            # Actividad de Agua (MEJORA: ahora visible en UI)
+            st.write("### 💧 Actividad de Agua")
+            aw_data = calc.calc_water_activity(totals)
+            aw_icon = "✅" if aw_data['riesgo_micro'] == 'bajo' else \
+                      "⚠️" if aw_data['riesgo_micro'] == 'medio' else "🔴"
+            aw1, aw2 = st.columns(2)
+            aw1.metric("Aw estimada", f"{aw_data['aw']:.4f}")
+            aw2.metric("Riesgo micro", aw_data['riesgo_micro'].capitalize())
+            with st.expander(f"{aw_icon} Interpretación Aw"):
+                st.write(aw_data['interpretacion'])
+                st.caption(f"Modelo: {aw_data['modelo']}")
+
+            # Validación Brix (MEJORA: ahora visible en UI si hay medición)
+            if brix_medido > 0:
+                st.write("### 🔭 Validación Brix")
+                bx = calc.validate_brix(brix_medido, totals)
+                bx1, bx2, bx3 = st.columns(3)
+                bx1.metric("Medido",   f"{brix_medido:.1f}°")
+                bx2.metric("Esperado", f"{bx['brix_con_msnf']:.1f}°")
+                bx3.metric("Delta",    f"{bx['delta_brix']:+.2f}°")
+                with st.expander("Interpretación Brix"):
+                    st.write(bx['interpretacion'])
+                    st.caption(
+                        f"Brix puro (azúcares): {bx['brix_calculado']:.1f}° · "
+                        f"Azúcar estimado desde Brix medido: {bx['sugars_estimados_g']:.1f} g"
+                    )
 
             # Overrun
             st.write("### 📐 Overrun")
@@ -328,12 +402,11 @@ with tab_form:
                 o1.metric("Beakers",    f"{or_d['pacojet_beakers']}")
                 o2.metric("Mix/beaker", f"{or_d['mix_per_beaker']:.0f} g")
             o3, o4 = st.columns(2)
-            o3.metric("Base necesaria",   f"{or_d['base_needed_g']:.0f} g")
+            o3.metric("Base necesaria",    f"{or_d['base_needed_g']:.0f} g")
             o4.metric("Litros producidos", f"{or_d['liters_from_base']:.2f} L")
 
             # Diagnósticos
             st.write("### 🚨 Diagnósticos")
-            # FIX B5: filtro consistente entre UI y ticket
             diags_visibles = [d for d in derived.get("diagnostics", [])
                               if d["key"] not in DIAGS_EXCLUIR_TICKET]
             if not diags_visibles:
@@ -345,7 +418,7 @@ with tab_form:
                     with st.expander(f"{icon} {d['title']}"):
                         st.write(d["tip"])
 
-            # Exportar ticket — T1: delegado a calc.format_production_ticket()
+            # Exportar ticket
             st.divider()
             st.download_button(
                 "⬇️ Descargar ticket (.txt)",
@@ -404,13 +477,15 @@ with tab_recetas:
                             for key in list(st.session_state.keys()):
                                 if (key.startswith("ing_name_") or
                                         key.startswith("grams_") or
-                                        key.startswith("price_")):
+                                        key.startswith("price_") or
+                                        key.startswith("_prev_ing_name_")):
                                     del st.session_state[key]
                             st.session_state.num_rows = max(len(lines), 4)
                             for i, line in enumerate(lines):
                                 st.session_state[f"ing_name_{i}"] = line["ingredient_name"]
                                 st.session_state[f"grams_{i}"]    = float(line["grams"])
                                 st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
+                                st.session_state[f"_prev_ing_name_{i}"] = line["ingredient_name"]
                             st.session_state["recipe_loaded_id"]   = rec["id"]
                             st.session_state["recipe_loaded_name"] = rec["name"]
                             st.success(f"✅ «{rec['name']}» cargada. Ve a la pestaña 🧪 Formulador.")
@@ -430,7 +505,6 @@ with tab_ingredientes:
 
     sub_ver, sub_nuevo = st.tabs(["📋 Ver / Editar", "➕ Nuevo ingrediente"])
 
-    # ── Subtab: Ver / Editar ──────────────────────────────────────────────────
     with sub_ver:
         try:
             all_ings = db.get_all_ingredients()
@@ -477,6 +551,8 @@ with tab_ingredientes:
                     if st.button("🗑️ Eliminar", key=f"btn_del_ing_{ing['id']}",
                                  use_container_width=True):
                         db.delete_ingredient(ing["id"])
+                        # MEJORA: invalidar cache al eliminar
+                        _invalidate_ingredient_cache()
                         st.warning(f"«{ing['name']}» eliminado.")
                         st.rerun()
 
@@ -511,11 +587,12 @@ with tab_ingredientes:
                                 "zero_calorie": ing.get("zero_calorie", 0),
                             }
                             db.save_ingredient(updated)
+                            # MEJORA: invalidar cache al editar
+                            _invalidate_ingredient_cache()
                             st.success(f"✅ «{e_name}» actualizado.")
                             st.session_state[f"edit_open_{ing['id']}"] = False
                             st.rerun()
 
-    # ── Subtab: Nuevo ingrediente ─────────────────────────────────────────────
     with sub_nuevo:
         st.write("### Agregar ingrediente nuevo")
 
@@ -562,6 +639,8 @@ with tab_ingredientes:
                     }
                     try:
                         db.save_ingredient(nuevo)
+                        # MEJORA: invalidar cache al agregar
+                        _invalidate_ingredient_cache()
                         st.success(f"✅ «{n_name}» agregado a la base de datos.")
                         st.rerun()
                     except Exception as ex:
