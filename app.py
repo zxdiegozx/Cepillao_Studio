@@ -662,13 +662,22 @@ with tab_form:
                 st.markdown("✅ Sistema de estabilización completo.")
             else:
                 for r in stab_recs:
-                    color = {"critical": "#f87171", "important": "#fb923c",
-                             "info": "#60a5fa"}.get(r.get('priority', 'info'), "#60a5fa")
-                    st.markdown(
-                        f"<div style='font-size:0.82rem;color:{color};margin-bottom:4px;'>"
-                        f"• {r['text']}</div>",
-                        unsafe_allow_html=True
-                    )
+                    prio_color = {"necesario":   "#ef4444",
+                                  "recomendado": "#fb923c",
+                                  "opcional":    "#3b82f6"}.get(r.get('priority', 'opcional'), "#3b82f6")
+                    with st.expander(f"● {r['stabilizer']} — {r['dose_g_per_kg']}"):
+                        st.markdown(f"**Dosis en receta:** {r['dose_g_recipe']}")
+                        st.markdown(
+                            f"<span style='color:#aaa;font-size:0.82rem;'>{r['reason']}</span>",
+                            unsafe_allow_html=True
+                        )
+                        if r.get('warning'):
+                            st.warning(r['warning'])
+                        for alt in r.get('alternativas', []):
+                            st.markdown(
+                                f"<div style='font-size:0.8rem;color:#999;padding:2px 0;'>{alt}</div>",
+                                unsafe_allow_html=True
+                            )
 
             # ── EDULCORANTES ──────────────────────────────────────────────────
             sw_data = calc.analyze_sweeteners(lines_for_calculator)
