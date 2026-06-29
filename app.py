@@ -44,206 +44,21 @@ for b in _bases_as_ings:
     ingredients_map[b['name']] = b
 ingredient_names = sorted(ingredients_map.keys())
 
+# config_params: carga desde BD al iniciar sesión (vacío si falla o es primera vez)
 if "config_params" not in st.session_state:
-    st.session_state.config_params = {}
+    try:
+        st.session_state.config_params = db.get_user_config()
+    except Exception:
+        st.session_state.config_params = {}
 
-# ── CSS personalizado ─────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* Fondo general */
-.main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-
-/* Tarjeta de sección en el panel de análisis */
-.gelato-card {
-    background: #1e1e2e;
-    border: 1px solid #2d2d44;
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 12px;
-}
-.gelato-card-title {
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #888;
-    margin-bottom: 10px;
-}
-
-/* Barra de parámetro */
-.param-bar-wrap { margin-bottom: 10px; }
-.param-bar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 3px;
-}
-.param-label { font-size: 0.82rem; color: #ccc; }
-.param-value { font-size: 1.05rem; font-weight: 700; color: #fff; }
-.param-range { font-size: 0.72rem; color: #666; }
-.param-bar-bg {
-    background: #2d2d44;
-    border-radius: 4px;
-    height: 6px;
-    position: relative;
-    overflow: visible;
-}
-.param-bar-range {
-    position: absolute;
-    height: 100%;
-    background: #2a4a2a;
-    border-radius: 4px;
-}
-.param-bar-fill {
-    position: absolute;
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-.bar-ok    { background: #4ade80; }
-.bar-low   { background: #60a5fa; }
-.bar-high  { background: #f87171; }
-.bar-empty { background: #444; }
-.param-status-ok    { color: #4ade80; font-size: 0.75rem; }
-.param-status-low   { color: #60a5fa; font-size: 0.75rem; }
-.param-status-high  { color: #f87171; font-size: 0.75rem; }
-.param-status-empty { color: #666;    font-size: 0.75rem; }
-
-/* Big metric */
-.big-metric {
-    text-align: center;
-    padding: 8px 4px;
-}
-.big-metric-value {
-    font-size: 1.9rem;
-    font-weight: 800;
-    line-height: 1.1;
-    color: #fff;
-}
-.big-metric-label {
-    font-size: 0.72rem;
-    color: #888;
-    margin-top: 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-.big-metric-sub {
-    font-size: 0.8rem;
-    color: #aaa;
-    margin-top: 1px;
-}
-
-/* Badge de estado */
-.badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-.badge-ok      { background: #14532d; color: #4ade80; }
-.badge-warn    { background: #451a03; color: #fb923c; }
-.badge-danger  { background: #450a0a; color: #f87171; }
-.badge-info    { background: #1e3a5f; color: #60a5fa; }
-
-/* Chips de diagnóstico */
-.diag-item {
-    padding: 10px 14px;
-    border-radius: 8px;
-    margin-bottom: 6px;
-    border-left: 3px solid;
-}
-.diag-critical { background: #1f0a0a; border-color: #ef4444; }
-.diag-important{ background: #1f150a; border-color: #f97316; }
-.diag-adjustable{ background: #0f1f2f; border-color: #3b82f6; }
-.diag-title { font-size: 0.85rem; font-weight: 600; color: #eee; }
-.diag-tip   { font-size: 0.78rem; color: #999; margin-top: 3px; }
-
-/* Fila de ingrediente */
-.ing-row-header {
-    display: grid;
-    grid-template-columns: 3fr 1.5fr 1.5fr;
-    gap: 6px;
-    font-size: 0.7rem;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 0 4px;
-    margin-bottom: 4px;
-}
-
-/* Pote fill */
-.pote-fill-wrap {
-    background: #1e1e2e;
-    border: 1px solid #2d2d44;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 10px;
-}
-.pote-fill-label {
-    font-size: 0.72rem;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
-}
-.pote-fill-bar-bg {
-    background: #2d2d44;
-    border-radius: 6px;
-    height: 10px;
-    overflow: hidden;
-}
-.pote-fill-bar { height: 100%; border-radius: 6px; }
-
-/* Overline label */
-.section-overline {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #555;
-    margin-bottom: 8px;
-    margin-top: 4px;
-}
-
-/* Tabla de composición compacta */
-.comp-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 10px;
-}
-.comp-cell {
-    background: #181828;
-    border-radius: 8px;
-    padding: 10px 12px;
-    border: 1px solid #252540;
-}
-.comp-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; letter-spacing: 0.06em; }
-.comp-cell-val   { font-size: 1.15rem; font-weight: 700; color: #fff; margin: 2px 0; }
-.comp-cell-hint  { font-size: 0.68rem; }
-
-/* Métricas de calorías */
-.kcal-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 8px;
-}
-.kcal-cell {
-    background: #181828;
-    border-radius: 8px;
-    padding: 10px 12px;
-    border: 1px solid #252540;
-    text-align: center;
-}
-.kcal-cell-val   { font-size: 1.2rem; font-weight: 800; color: #fff; }
-.kcal-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; }
-
-div[data-testid="stMetricValue"] { font-size: 18px !important; font-weight: 700 !important; }
-div[data-testid="stSidebar"] { background: #111120; }
-</style>
-""", unsafe_allow_html=True)
+# ── CSS personalizado (cargado desde archivo para separar estilos de lógica) ─
+try:
+    import pathlib
+    _css_path = pathlib.Path(__file__).parent / ".streamlit" / "custom.css"
+    _css = _css_path.read_text(encoding="utf-8")
+    st.markdown(f"<style>{_css}</style>", unsafe_allow_html=True)
+except FileNotFoundError:
+    pass  # en deploy sin el archivo, la app funciona sin estilos extra
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -316,22 +131,54 @@ def _card_open():
 def _card_close():
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ═════════════════════════════════════════════════════════════════════════════
+# HELPERS DEL FORMULADOR (nivel módulo — accesibles desde cualquier tab)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _collect_lines():
+    """Lee el grid de ingredientes del session_state y retorna lista de dicts."""
+    lines = []
+    for i in range(st.session_state.get("num_rows", 4)):
+        n = st.session_state.get(f"ing_name_{i}", "")
+        g = st.session_state.get(f"grams_{i}", 0.0)
+        p = st.session_state.get(f"price_{i}", 0.0)
+        if n and g:
+            lines.append({"ingredient_name": n, "grams": g, "price_per_kg": p})
+    return lines
+
+
+def _load_recipe_into_state(lines, recipe_id=None, recipe_name=""):
+    """Inyecta líneas de receta en session_state y fuerza rerun."""
+    for key in list(st.session_state.keys()):
+        if any(key.startswith(p) for p in ["ing_name_", "grams_", "price_", "_prev_ing_name_"]):
+            del st.session_state[key]
+    st.session_state.num_rows = max(len(lines), 4)
+    for i, line in enumerate(lines):
+        st.session_state[f"ing_name_{i}"] = line["ingredient_name"]
+        st.session_state[f"grams_{i}"]    = float(line["grams"])
+        st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
+    st.session_state["recipe_loaded_id"]   = recipe_id
+    st.session_state["recipe_loaded_name"] = recipe_name
+    # REC 3: toast para confirmar sin depender del st.success que se pierde en rerun
+    st.toast(f"✅ «{recipe_name}» cargada en el Formulador", icon="🍦")
+
+
+def callback_add_row():
+    st.session_state.num_rows += 1
+
+
+def callback_clear_all():
+    for key in list(st.session_state.keys()):
+        if key.startswith("ing_name_") or key.startswith("grams_") or key.startswith("price_"):
+            del st.session_state[key]
+    st.session_state.num_rows = 4
+    st.session_state.pop("recipe_loaded_id", None)
+    st.session_state.pop("recipe_loaded_name", None)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 — FORMULADOR
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_form:
-
-    def callback_add_row():
-        st.session_state.num_rows += 1
-
-    def callback_clear_all():
-        for key in list(st.session_state.keys()):
-            if key.startswith("ing_name_") or key.startswith("grams_") or key.startswith("price_"):
-                del st.session_state[key]
-        st.session_state.num_rows = 4
-        st.session_state.pop("recipe_loaded_id", None)
-        st.session_state.pop("recipe_loaded_name", None)
 
     if "num_rows" not in st.session_state:
         st.session_state.num_rows = 4
@@ -344,6 +191,22 @@ with tab_form:
         value=st.session_state.get("recipe_loaded_name", ""),
         placeholder="Ej: Choco Creami v3"
     )
+    
+    # Indicador visual de receta activa (persiste en sidebar durante la sesión)
+    _loaded_name = st.session_state.get("recipe_loaded_name", "")
+    _loaded_id   = st.session_state.get("recipe_loaded_id")
+    if _loaded_name:
+        _tipo = "Receta" if _loaded_id else "Base"
+        st.sidebar.markdown(
+            f"""<div style="background:#0f2a0f;border:1px solid #2d4a2d;border-radius:8px;
+            padding:8px 12px;margin:4px 0 8px;font-size:0.78rem;">
+            <span style="color:#666;text-transform:uppercase;letter-spacing:0.06em;font-size:0.68rem;">
+            {_tipo} activa</span><br>
+            <span style="color:#4ade80;font-weight:600;">📂 {_loaded_name}</span>
+            </div>""",
+            unsafe_allow_html=True
+        )
+        
     product_type = st.sidebar.selectbox("Tipo de Producto", PRODUCT_TYPES)
     machine      = st.sidebar.selectbox("Maquinaria", MACHINES, index=0)
     is_creami    = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
@@ -370,16 +233,6 @@ with tab_form:
     )
 
     st.sidebar.divider()
-
-    def _collect_lines():
-        lines = []
-        for i in range(st.session_state.num_rows):
-            n = st.session_state.get(f"ing_name_{i}", "")
-            g = st.session_state.get(f"grams_{i}", 0.0)
-            p = st.session_state.get(f"price_{i}", 0.0)
-            if n and g:
-                lines.append({"ingredient_name": n, "grams": g, "price_per_kg": p})
-        return lines
 
     def guardar_receta():
         nombre = recipe_name_input.strip()
@@ -817,19 +670,11 @@ with tab_recetas:
                     if st.button("📂 Cargar", key=f"load_{rec['id']}", use_container_width=True):
                         full = db.get_recipe(rec["id"])
                         if full:
-                            lines = full.get("lines", [])
-                            for key in list(st.session_state.keys()):
-                                if any(key.startswith(p) for p in
-                                       ["ing_name_", "grams_", "price_", "_prev_ing_name_"]):
-                                    del st.session_state[key]
-                            st.session_state.num_rows = max(len(lines), 4)
-                            for i, line in enumerate(lines):
-                                st.session_state[f"ing_name_{i}"] = line["ingredient_name"]
-                                st.session_state[f"grams_{i}"]    = float(line["grams"])
-                                st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
-                            st.session_state["recipe_loaded_id"]   = rec["id"]
-                            st.session_state["recipe_loaded_name"] = rec["name"]
-                            st.success(f"✅ «{rec['name']}» cargada.")
+                            _load_recipe_into_state(
+                                full.get("lines", []),
+                                recipe_id=rec["id"],
+                                recipe_name=rec["name"]
+                            )
                             st.rerun()
                     if st.button("🗑️ Eliminar", key=f"del_{rec['id']}", use_container_width=True):
                         db.delete_recipe(rec["id"])
@@ -881,17 +726,11 @@ with tab_bases:
                         st.write(f"  · {line['ingredient_name']}: {float(line['grams']):.1f} g")
                 col_a, col_b, col_c = st.columns(3)
                 if col_a.button("📂 Cargar", key=f"loadbase_{base['id']}", use_container_width=True):
-                    for key in list(st.session_state.keys()):
-                        if any(key.startswith(p) for p in ["ing_name_", "grams_", "price_", "_prev_ing_name_"]):
-                            del st.session_state[key]
-                    st.session_state.num_rows = max(len(lines), 4)
-                    for i, line in enumerate(lines):
-                        st.session_state[f"ing_name_{i}"] = line["ingredient_name"]
-                        st.session_state[f"grams_{i}"]    = float(line["grams"])
-                        st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
-                    st.session_state["recipe_loaded_id"]   = None
-                    st.session_state["recipe_loaded_name"] = base["name"]
-                    st.success(f"✅ Base «{base['name']}» cargada.")
+                    _load_recipe_into_state(
+                        lines,
+                        recipe_id=None,
+                        recipe_name=base["name"]
+                    )
                     st.rerun()
                 if col_b.button("📋 Duplicar", key=f"dupbase_{base['id']}", use_container_width=True):
                     db.save_recipe({"name": f"{base['name']} (copia)", "product_type": base["product_type"],
@@ -1061,17 +900,26 @@ with tab_config:
 
         cs, cr = st.columns(2)
         if cs.form_submit_button("💾 Guardar", use_container_width=True):
-            st.session_state.config_params[cfg_key] = {
+            nueva_cfg = {
                 'st': (st_lo, st_hi), 'fat': (fat_lo, fat_hi),
                 'msnf': (msnf_lo, msnf_hi), 'sugars': (sug_lo, sug_hi),
                 'pod': (pod_lo, pod_hi), 'pac': (pac_lo, pac_hi),
                 'st_water': (stw_lo, stw_hi),
             }
-            st.success(f"✅ Guardado para {cfg_product} · {cfg_machine}")
+            st.session_state.config_params[cfg_key] = nueva_cfg
+            try:
+                db.set_user_config(cfg_key, nueva_cfg)
+                st.success(f"✅ Guardado para {cfg_product} · {cfg_machine} (persistido en BD)")
+            except Exception as e:
+                st.warning(f"⚠️ Guardado en sesión, pero falló BD: {e}")
         if cr.form_submit_button("🔄 Restaurar defaults", use_container_width=True):
             if cfg_key in st.session_state.config_params:
                 del st.session_state.config_params[cfg_key]
-            st.success("✅ Defaults restaurados.")
+            try:
+                db.delete_user_config(cfg_key)
+                st.success("✅ Defaults restaurados (borrado de BD)")
+            except Exception:
+                st.success("✅ Defaults restaurados")
             st.rerun()
 
     if st.session_state.config_params:
