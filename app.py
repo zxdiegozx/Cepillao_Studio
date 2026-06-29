@@ -226,7 +226,78 @@ with tab_form:
             else:
                 st.info("No se detectan edulcorantes significativos.")
 
-            # ── Recomendaciones de estabilizantes ────────────────────────────
+            # ── Análisis de Proteínas ─────────────────────────────────────────
+            st.divider()
+            st.subheader("💪 Proteínas")
+            totals_tmp = calc.calc_totals(lines_for_calculator)
+            pct_tmp    = calc.calc_percentages(totals_tmp)
+            prot_data  = calc.analyze_protein(
+                lines_for_calculator, totals_tmp, pct_tmp, product_type
+            )
+            if prot_data and prot_data.get('fuentes'):
+                # Métricas principales
+                p1, p2, p3 = st.columns(3)
+                p1.metric("Proteína total",
+                          f"{prot_data['protein_total_g']:.1f} g",
+                          f"{prot_data['protein_per_100g']:.1f} g/100g")
+                p2.metric("Tipo dominante", prot_data['tipo_dominante'].capitalize())
+
+                claim = prot_data.get('claim')
+                if claim == 'alto_proteina':
+                    p3.metric("Claim", "✅ Alto en proteína", "≥10 g/100g")
+                elif claim == 'fuente_proteina':
+                    p3.metric("Claim", "✅ Fuente de proteína", "≥5 g/100g")
+                else:
+                    p3.metric("Claim", "—", f"{prot_data['protein_per_100g']:.1f} g/100g")
+
+                # Scores funcionales
+                sc1, sc2 = st.columns(2)
+                espuma_bar = int(prot_data['score_espuma'] / 5 * 100)
+                gel_bar    = int(prot_data['score_gel']    / 5 * 100)
+                sc1.progress(espuma_bar,
+                             text=f"Capacidad espuma/overrun: {prot_data['score_espuma']:.1f}/5")
+                sc2.progress(gel_bar,
+                             text=f"Capacidad gel/cuerpo: {prot_data['score_gel']:.1f}/5")
+
+                # Desglose por tipo
+                if prot_data['pct_por_tipo']:
+                    tipo_str = " · ".join(
+                        f"{t.capitalize()}: {v:.0f}%"
+                        for t, v in sorted(prot_data['pct_por_tipo'].items(),
+                                           key=lambda x: -x[1])
+                    )
+                    st.caption(f"Distribución: {tipo_str}")
+
+                # Fuentes individuales
+                for f in prot_data['fuentes']:
+                    with st.expander(
+                        f"**{f['nombre']}** — {f['proteina_g']:.1f} g prot "
+                        f"({f['tipo']})"
+                    ):
+                        fa, fb, fc = st.columns(3)
+                        fa.metric("Proteína", f"{f['proteina_g']:.1f} g")
+                        fb.metric("Espuma", f"{f['espuma']}/5")
+                        fc.metric("Gel", f"{f['gel']}/5")
+                        if f['t_denat']:
+                            st.caption(f"🌡️ Desnaturaliza a {f['t_denat']}°C")
+                        if f['nota']:
+                            st.info(f['nota'])
+
+                # Advertencias de proceso
+                for adv in prot_data.get('advertencias', []):
+                    st.warning(adv)
+
+                # Recomendaciones
+                if prot_data.get('recomendaciones'):
+                    for r in prot_data['recomendaciones']:
+                        icon = "🔴" if r['priority'] == 'critical' else \
+                               "🟡" if r['priority'] == 'important' else "🔵"
+                        with st.expander(f"{icon} {r['titulo']}"):
+                            st.write(r['texto'])
+                else:
+                    st.success("✅ Perfil proteico adecuado para este tipo de producto.")
+            else:
+                st.info("No se detectan fuentes proteicas significativas en esta receta.")
             st.divider()
             st.subheader("🧪 Estabilizantes")
             totals_tmp = calc.calc_totals(lines_for_calculator)
@@ -432,6 +503,9 @@ with tab_form:
                     pct=pct,
                     derived=derived,
                     kcal=kcal,
+                    protein_data=calc.analyze_protein(
+                        lines_for_calculator, totals, pct, product_type
+                    ),
                 ).encode("utf-8"),
                 file_name="ticket_produccion.txt",
                 mime="text/plain",
