@@ -1,0 +1,177 @@
+/* Cepillao' Gelato Studio — custom.css
+   Colocar en: .streamlit/custom.css
+   Cargado en app.py con: pathlib.Path(__file__).parent / ".streamlit" / "custom.css"
+*/
+
+/* Fondo general */
+.main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+
+/* Tarjeta de sección en el panel de análisis */
+.gelato-card {
+    background: #1e1e2e;
+    border: 1px solid #2d2d44;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+.gelato-card-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 10px;
+}
+
+/* Barra de parámetro */
+.param-bar-wrap {
+    background: #1e1e2e;
+    border: 1px solid #2d2d44;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+}
+.param-bar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+}
+.param-label { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+.param-value { font-size: 1rem; font-weight: 700; color: #fff; }
+.param-bar-bg {
+    background: #252540;
+    border-radius: 6px;
+    height: 8px;
+    position: relative;
+    overflow: hidden;
+}
+.param-target-zone {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(74,222,128,0.15);
+    border-left: 1.5px solid #4ade80;
+    border-right: 1.5px solid #4ade80;
+}
+.param-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+.bar-ok   { background: #4ade80; }
+.bar-warn { background: #fb923c; }
+.bar-err  { background: #f87171; }
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-right: 4px;
+    margin-bottom: 4px;
+}
+.badge-ok      { background: #0f2a0f; color: #4ade80; }
+.badge-warn    { background: #2a1f0f; color: #fb923c; }
+.badge-err     { background: #2a0f0f; color: #f87171; }
+.badge-info    { background: #1e3a5f; color: #60a5fa; }
+
+/* Chips de diagnóstico */
+.diag-item {
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    border-left: 3px solid;
+}
+.diag-critical  { background: #1f0a0a; border-color: #ef4444; }
+.diag-important { background: #1f150a; border-color: #f97316; }
+.diag-adjustable{ background: #0f1f2f; border-color: #3b82f6; }
+.diag-title { font-size: 0.85rem; font-weight: 600; color: #eee; }
+.diag-tip   { font-size: 0.78rem; color: #999; margin-top: 3px; }
+
+/* Fila de ingrediente */
+.ing-row-header {
+    display: grid;
+    grid-template-columns: 3fr 1.5fr 1.5fr;
+    gap: 6px;
+    font-size: 0.7rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 4px;
+    margin-bottom: 4px;
+}
+
+/* Pote fill */
+.pote-fill-wrap {
+    background: #1e1e2e;
+    border: 1px solid #2d2d44;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+}
+.pote-fill-label {
+    font-size: 0.72rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.pote-fill-bar-bg {
+    background: #2d2d44;
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+}
+.pote-fill-bar { height: 100%; border-radius: 6px; }
+
+/* Overline label */
+.section-overline {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #555;
+    margin-bottom: 8px;
+    margin-top: 4px;
+}
+
+/* Tabla de composición compacta */
+.comp-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.comp-cell {
+    background: #181828;
+    border-radius: 8px;
+    padding: 10px 12px;
+    border: 1px solid #252540;
+}
+.comp-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; letter-spacing: 0.06em; }
+.comp-cell-val   { font-size: 1.15rem; font-weight: 700; color: #fff; margin: 2px 0; }
+.comp-cell-hint  { font-size: 0.68rem; }
+
+/* Métricas de calorías */
+.kcal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.kcal-cell {
+    background: #181828;
+    border-radius: 8px;
+    padding: 10px 12px;
+    border: 1px solid #252540;
+    text-align: center;
+}
+.kcal-cell-val   { font-size: 1.2rem; font-weight: 800; color: #fff; }
+.kcal-cell-label { font-size: 0.68rem; color: #666; text-transform: uppercase; }
+
+div[data-testid="stMetricValue"] { font-size: 18px !important; font-weight: 700 !important; }
+div[data-testid="stSidebar"] { background: #111120; }
