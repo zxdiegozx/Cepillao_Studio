@@ -41,3 +41,35 @@ PRIORITY_ADJUSTABLE = "adjustable"
 
 # ── Diagnósticos excluidos del ticket de producción ───────────────────────────
 DIAGS_EXCLUIR_TICKET = {"creami_overrun_hint"}
+
+# ── Categorías de ingredientes ────────────────────────────────────────────────
+CATEGORY_ALCOHOL = "Alcohol"
+
+# Fracción másica de etanol puro según graduación típica de cada licor.
+# Clave: substring en minúsculas del nombre del ingrediente.
+# Valor: fracción de etanol puro (0-1) respecto a la masa del ingrediente.
+# Fuente: densidad etanol 0.789 g/ml; % vol × densidad / 100.
+ALCOHOL_ETHANOL_FRACTION = {
+    "ron":        0.316,   # 40% vol → 40 × 0.789 / 100
+    "vodka":      0.316,
+    "whisky":     0.316,
+    "whiskey":    0.316,
+    "tequila":    0.316,
+    "ginebra":    0.316,
+    "gin":        0.316,
+    "amaretto":   0.221,   # 28% vol
+    "limoncello": 0.237,   # 30% vol
+    "baileys":    0.142,   # 18% vol
+    "kahlúa":     0.197,   # 25% vol
+    "kahlua":     0.197,
+    "cointreau":  0.316,   # 40% vol
+    "grand marnier": 0.316,
+    "kirsch":     0.394,   # 50% vol
+    "sambuca":    0.316,
+    "frangelico": 0.237,
+    "malibu":     0.158,   # 20% vol
+    "champagne":  0.094,   # 12% vol
+    "vino":       0.094,
+    "beer":       0.039,
+    "cerveza":    0.039,
+}
