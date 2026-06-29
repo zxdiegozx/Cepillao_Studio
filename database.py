@@ -1,6 +1,10 @@
 import sqlite3, json, os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "gelato.db")
+# FIX B4: DB_PATH ahora lee RAILWAY_VOLUME_MOUNT_PATH correctamente.
+# En Railway con volumen montado: guarda en /data/gelato.db (persistente).
+# En desarrollo local o sin volumen: guarda junto al script (comportamiento anterior).
+_vol  = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+DB_PATH = os.path.join(_vol if _vol else os.path.dirname(os.path.abspath(__file__)), "gelato.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ingredients (
@@ -129,7 +133,6 @@ def get_connection():
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
-    # Migración segura para BDs existentes — añade columnas si no existen
     migrations = [
         "ALTER TABLE ingredients ADD COLUMN price_per_kg REAL DEFAULT 0",
         "ALTER TABLE ingredients ADD COLUMN calories_per_100g REAL DEFAULT 0",
@@ -140,8 +143,7 @@ def init_db():
             conn.execute(sql)
             conn.commit()
         except Exception:
-            pass  # columna ya existe
-    # Seed ingredients if empty
+            pass
     count = conn.execute("SELECT COUNT(*) FROM ingredients").fetchone()[0]
     if count == 0:
         conn.executemany(
