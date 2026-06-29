@@ -1,4 +1,5 @@
-import sqlite3, json, os
+import sqlite3, os
+from constants import MACHINE_CREAMI_DELUXE
 
 # FIX B4: DB_PATH ahora lee RAILWAY_VOLUME_MOUNT_PATH correctamente.
 # En Railway con volumen montado: guarda en /data/gelato.db (persistente).
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS ingredients (
     zero_calorie INTEGER DEFAULT 0
 );
 
+-- T3: índice explícito en name para búsquedas frecuentes por nombre
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ingredients_name ON ingredients(name);
+
 CREATE TABLE IF NOT EXISTS recipes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -49,7 +53,26 @@ CREATE TABLE IF NOT EXISTS recipe_lines (
     price_per_kg REAL DEFAULT 0,
     sort_order INTEGER DEFAULT 0
 );
+
+-- T6: registro de versiones de migración aplicadas
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    description TEXT NOT NULL
+);
 """
+
+# T6: migraciones con versión explícita.
+# Cada entrada: (version, sql, description)
+# Nunca modificar entradas ya aplicadas — solo añadir nuevas al final.
+MIGRATIONS = [
+    (1, "ALTER TABLE ingredients ADD COLUMN price_per_kg REAL DEFAULT 0",
+        "Añade precio por kg a ingredientes"),
+    (2, "ALTER TABLE ingredients ADD COLUMN calories_per_100g REAL DEFAULT 0",
+        "Añade calorías por 100g a ingredientes"),
+    (3, "ALTER TABLE ingredients ADD COLUMN zero_calorie INTEGER DEFAULT 0",
+        "Añade flag zero_calorie a ingredientes"),
+]
 
 DB_DATA = [
     # name, cat, fat, msnf, sugars, other_st, pod, pac, water, notes, function, brix, ph
@@ -133,17 +156,29 @@ def get_connection():
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
-    migrations = [
-        "ALTER TABLE ingredients ADD COLUMN price_per_kg REAL DEFAULT 0",
-        "ALTER TABLE ingredients ADD COLUMN calories_per_100g REAL DEFAULT 0",
-        "ALTER TABLE ingredients ADD COLUMN zero_calorie INTEGER DEFAULT 0",
-    ]
-    for sql in migrations:
-        try:
-            conn.execute(sql)
-            conn.commit()
-        except Exception:
-            pass
+
+    # T6: migraciones versionadas — cada versión se aplica exactamente una vez
+    applied = {
+        row[0]
+        for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    for version, sql, description in MIGRATIONS:
+        if version not in applied:
+            try:
+                conn.execute(sql)
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
+                    (version, description)
+                )
+                conn.commit()
+            except Exception as e:
+                conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)",
+                    (version, f"{description} [ya existía: {e}]")
+                )
+                conn.commit()
+
+    # Seed de ingredientes si la tabla está vacía
     count = conn.execute("SELECT COUNT(*) FROM ingredients").fetchone()[0]
     if count == 0:
         conn.executemany(
