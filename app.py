@@ -36,8 +36,18 @@ def _invalidate_ingredient_cache():
     st.session_state.ing_cache_version += 1
 
 ingredients_raw  = _load_ingredients(st.session_state.ing_cache_version)
+
+# Incorporar bases de helado guardadas como ingredientes compuestos
+try:
+    _bases_as_ings = db.get_bases_as_ingredients()
+except Exception:
+    _bases_as_ings = []
+
 ingredients_map  = {ing['name']: ing for ing in ingredients_raw}
-ingredient_names = list(ingredients_map.keys())
+# Las bases se añaden al mapa con prioridad (nombre único por prefijo 🧪)
+for b in _bases_as_ings:
+    ingredients_map[b['name']] = b
+ingredient_names = sorted(ingredients_map.keys())
 
 # ── Configuración de parámetros (menú de configuración) ──────────────────────
 if "config_params" not in st.session_state:
@@ -53,9 +63,10 @@ div[data-testid="stMetricValue"] { font-size: 20px; font-weight: bold; }
 st.title("🍦 Cepillao' Gelato Studio")
 st.caption("Ninja Creami Edition · Formulador artesanal de helados")
 
-tab_form, tab_recetas, tab_ingredientes, tab_config = st.tabs([
+tab_form, tab_recetas, tab_bases, tab_ingredientes, tab_config = st.tabs([
     "🧪 Formulador",
     "📁 Mis Recetas",
+    "🧫 Bases de Helado",
     "🗄️ Ingredientes",
     "⚙️ Configuración",
 ])
@@ -135,6 +146,7 @@ with tab_form:
             "machine":      machine,
             "base_grams":   sum(l["grams"] for l in lines_to_save),
             "notes":        "",
+            "is_base":      0,
             "lines":        lines_to_save,
         }
         existing_id = st.session_state.get("recipe_loaded_id")
@@ -145,8 +157,40 @@ with tab_form:
             db.save_recipe(recipe_data)
             st.sidebar.success(f"✅ «{nombre}» guardada.")
 
-    st.sidebar.button("💾 Guardar receta", on_click=guardar_receta, use_container_width=True)
-    st.sidebar.button("🗑️ Limpiar todo",   on_click=callback_clear_all, use_container_width=True)
+    def guardar_como_base():
+        nombre = recipe_name_input.strip()
+        if not nombre:
+            st.sidebar.error("Escribe un nombre para la base.")
+            return
+        lines_to_save = []
+        for i in range(st.session_state.num_rows):
+            n = st.session_state.get(f"ing_name_{i}", "")
+            g = st.session_state.get(f"grams_{i}", 0.0)
+            p = st.session_state.get(f"price_{i}", 0.0)
+            if n and g:
+                lines_to_save.append({"ingredient_name": n, "grams": g, "price_per_kg": p})
+        if not lines_to_save:
+            st.sidebar.error("Añade al menos un ingrediente.")
+            return
+        base_data = {
+            "name":         nombre,
+            "product_type": product_type,
+            "machine":      machine,
+            "base_grams":   sum(l["grams"] for l in lines_to_save),
+            "notes":        "Base de helado — concentrado reutilizable",
+            "is_base":      1,
+            "lines":        lines_to_save,
+        }
+        db.save_recipe(base_data)
+        _invalidate_ingredient_cache()   # fuerza recarga para mostrar base en formulador
+        st.sidebar.success(f"🧫 «{nombre}» guardada como Base de Helado. "
+                           "Ya puedes usarla como ingrediente en otras recetas.")
+
+    st.sidebar.button("💾 Guardar receta",      on_click=guardar_receta,    use_container_width=True)
+    st.sidebar.button("🧫 Guardar como Base",    on_click=guardar_como_base, use_container_width=True,
+                      help="Guarda esta formulación como base reutilizable. "
+                           "Aparecerá como ingrediente en futuras recetas.")
+    st.sidebar.button("🗑️ Limpiar todo",         on_click=callback_clear_all, use_container_width=True)
 
     # ── Layout principal ──────────────────────────────────────────────────────
     col_ing, col_panel = st.columns([1, 1], gap="large")
@@ -412,7 +456,7 @@ with tab_recetas:
     st.subheader("📁 Mis Recetas Guardadas")
 
     try:
-        all_recipes = db.get_all_recipes()
+        all_recipes = db.get_all_recipes(recipes_only=True)
     except Exception as e:
         st.error(f"Error cargando recetas: {e}")
         all_recipes = []
@@ -462,7 +506,110 @@ with tab_recetas:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TAB 3 — GESTIÓN DE INGREDIENTES
+# TAB 3 — BASES DE HELADO
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_bases:
+    st.subheader("🧫 Bases de Helado Guardadas")
+    st.markdown(
+        "Una **base de helado** es una formulación concentrada (mezcla de ingredientes "
+        "sin saborizante final) que puedes reutilizar como ingrediente en otras recetas. "
+        "Por ejemplo: _Base láctea estándar_, _Base light proteica_, _Base de coco vegana_. "
+        "Una vez guardada aparece automáticamente en el selector de ingredientes del Formulador "
+        "con el prefijo 🧪."
+    )
+
+    try:
+        all_bases = db.get_all_recipes(bases_only=True)
+    except Exception as e:
+        st.error(f"Error: {e}")
+        all_bases = []
+
+    if not all_bases:
+        st.info("No tienes bases guardadas aún. Formula una en 🧪 y pulsa **Guardar como Base**.")
+    else:
+        search_base = st.text_input("🔍 Buscar base", placeholder="Nombre de la base...")
+        if search_base:
+            all_bases = [b for b in all_bases if search_base.lower() in b["name"].lower()]
+
+        for base in all_bases:
+            full = db.get_recipe(base["id"])
+            lines = full.get("lines", []) if full else []
+
+            # Recalcular composición para mostrar
+            ings_comp = []
+            for line in lines:
+                ing_obj = ingredients_map.get(line["ingredient_name"])
+                if ing_obj and line["grams"]:
+                    ings_comp.append((ing_obj, float(line["grams"]), 0))
+
+            comp_str = ""
+            if ings_comp:
+                try:
+                    t = calc.calc_totals(ings_comp)
+                    p = calc.calc_percentages(t)
+                    comp_str = (
+                        f"ST {p.get('st_pct',0):.1f}% · "
+                        f"Grasa {p.get('fat_pct',0):.1f}% · "
+                        f"MSNF {p.get('msnf_pct',0):.1f}% · "
+                        f"Azúcar {p.get('sugars_pct',0):.1f}% · "
+                        f"Agua {p.get('water_pct',0):.1f}%"
+                    )
+                except Exception:
+                    comp_str = "Error calculando composición"
+
+            with st.expander(f"**🧫 {base['name']}** — {base.get('base_grams',0):.0f} g "
+                             f"· {base['product_type']}"):
+                if comp_str:
+                    st.caption(f"📊 {comp_str}")
+                st.caption(f"Guardada: {base.get('updated_at','')[:16]}")
+
+                if lines:
+                    st.write("**Ingredientes de la base:**")
+                    for line in lines:
+                        st.write(f"  · {line['ingredient_name']}: {float(line['grams']):.1f} g")
+
+                col_a, col_b, col_c = st.columns(3)
+
+                if col_a.button("📂 Cargar en Formulador", key=f"loadbase_{base['id']}",
+                                use_container_width=True):
+                    for key in list(st.session_state.keys()):
+                        if (key.startswith("ing_name_") or key.startswith("grams_") or
+                                key.startswith("price_") or key.startswith("_prev_ing_name_")):
+                            del st.session_state[key]
+                    st.session_state.num_rows = max(len(lines), 4)
+                    for i, line in enumerate(lines):
+                        st.session_state[f"ing_name_{i}"] = line["ingredient_name"]
+                        st.session_state[f"grams_{i}"]    = float(line["grams"])
+                        st.session_state[f"price_{i}"]    = float(line.get("price_per_kg", 0))
+                    st.session_state["recipe_loaded_id"]   = None   # no sobreescribir base
+                    st.session_state["recipe_loaded_name"] = base["name"]
+                    st.success(f"✅ Base «{base['name']}» cargada en el Formulador.")
+                    st.rerun()
+
+                if col_b.button("📋 Duplicar como receta", key=f"dupbase_{base['id']}",
+                                use_container_width=True):
+                    new_data = {
+                        "name":         f"{base['name']} (copia)",
+                        "product_type": base["product_type"],
+                        "machine":      base["machine"],
+                        "base_grams":   base.get("base_grams", 0),
+                        "notes":        "Copiada desde base de helado",
+                        "is_base":      0,
+                        "lines":        lines,
+                    }
+                    db.save_recipe(new_data)
+                    st.success(f"✅ Copia guardada en Mis Recetas.")
+
+                if col_c.button("🗑️ Eliminar base", key=f"delbase_{base['id']}",
+                                use_container_width=True):
+                    db.delete_recipe(base["id"])
+                    _invalidate_ingredient_cache()
+                    st.warning(f"Base «{base['name']}» eliminada.")
+                    st.rerun()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 4 — GESTIÓN DE INGREDIENTES
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_ingredientes:
     st.subheader("🗄️ Base de Datos de Ingredientes")
