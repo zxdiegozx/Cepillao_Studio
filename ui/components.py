@@ -5,36 +5,61 @@ import calculator as calc
 
 def _param_bar(label, val, lo, hi, unit="%", scale_max=None):
     s = calc._status(val, lo, hi)
-    bar_class  = {"ok": "bar-ok", "low": "bar-low", "high": "bar-high", "empty": "bar-empty"}[s]
-    hint_class = {"ok": "param-status-ok", "low": "param-status-low",
-                  "high": "param-status-high", "empty": "param-status-empty"}[s]
-    hint_text  = {"ok": "✓ En rango", "low": f"↑ mín {lo}{unit}",
-                  "high": f"↓ máx {hi}{unit}", "empty": "—"}[s]
-
     if scale_max is None:
         scale_max = (hi or 10) * 1.5
 
-    fill_pct   = min(val / scale_max * 100, 100) if scale_max > 0 else 0
-    range_lo_p = (lo or 0) / scale_max * 100 if scale_max > 0 else 0
-    range_hi_p = (hi or scale_max) / scale_max * 100 if scale_max > 0 else 100
+    fill_pct = min(max(val / scale_max * 100, 0), 100) if scale_max else 0
+    zone_lo  = (lo or 0) / scale_max * 100 if scale_max else 0
+    zone_hi  = min((hi or scale_max) / scale_max * 100, 100) if scale_max else 100
+    zone_w   = max(zone_hi - zone_lo, 0)
+
+    val_str = f"{val:.0f}" if unit == "" else f"{val:.1f}"
+
+    # Paleta por estado
+    _C = {
+        "ok":    ("linear-gradient(90deg,#16a34a,#22c55e,#4ade80)",
+                  "rgba(34,197,94,0.18)", "#4ade80",
+                  f"✓ En rango"),
+        "low":   ("linear-gradient(90deg,#1e3a8a,#3b82f6,#93c5fd)",
+                  "rgba(59,130,246,0.18)", "#93c5fd",
+                  f"↑ bajo {lo}{unit}"),
+        "high":  ("linear-gradient(90deg,#7f1d1d,#ef4444,#fca5a5)",
+                  "rgba(239,68,68,0.18)", "#fca5a5",
+                  f"↓ sobre {hi}{unit}"),
+        "empty": ("linear-gradient(90deg,#1e1e38,#2d2d50)",
+                  "rgba(80,80,120,0.08)", "#444",
+                  "—"),
+    }
+    grad, badge_bg, badge_fg, badge_txt = _C[s]
 
     st.markdown(f"""
-<div class="param-bar-wrap">
-  <div class="param-bar-header">
-    <span class="param-label">{label}</span>
-    <span class="param-value">{val:.1f}{unit}</span>
-    <span class="{hint_class}">{hint_text}</span>
+<div class="pbar-wrap">
+  <div class="pbar-header">
+    <span class="pbar-label">{label}</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="pbar-value">{val_str}{unit}</span>
+      <span style="font-size:0.6rem;font-weight:700;letter-spacing:0.06em;
+             text-transform:uppercase;padding:2px 8px;border-radius:999px;
+             background:{badge_bg};color:{badge_fg};">{badge_txt}</span>
+    </div>
   </div>
-  <div class="param-bar-bg">
-    <div class="param-bar-range"
-         style="left:{range_lo_p:.1f}%;width:{range_hi_p-range_lo_p:.1f}%;"></div>
-    <div class="param-bar-fill {bar_class}"
-         style="width:{fill_pct:.1f}%;"></div>
+  <div style="position:relative;height:10px;margin:2px 0 6px;">
+    <div style="position:absolute;inset:0;background:#0d0d1a;border-radius:999px;overflow:hidden;">
+      <div style="position:absolute;top:0;bottom:0;
+                  left:{zone_lo:.2f}%;width:{zone_w:.2f}%;
+                  background:rgba(34,197,94,0.07);
+                  border-left:1.5px solid rgba(34,197,94,0.28);
+                  border-right:1.5px solid rgba(34,197,94,0.28);"></div>
+      <div style="position:absolute;top:0;bottom:0;left:0;
+                  width:{fill_pct:.2f}%;
+                  background:{grad};
+                  border-radius:999px;"></div>
+    </div>
   </div>
-  <div style="display:flex;justify-content:space-between;margin-top:2px;">
-    <span class="param-range">0</span>
-    <span class="param-range">rango {lo}–{hi}{unit}</span>
-    <span class="param-range">{scale_max:.0f}{unit}</span>
+  <div style="display:flex;justify-content:space-between;">
+    <span style="font-size:0.58rem;color:#3a3a55;">0</span>
+    <span style="font-size:0.58rem;color:#3a5a3a;letter-spacing:0.03em;">óptimo {lo}–{hi}{unit}</span>
+    <span style="font-size:0.58rem;color:#3a3a55;">{scale_max:.0f}{unit}</span>
   </div>
 </div>""", unsafe_allow_html=True)
 

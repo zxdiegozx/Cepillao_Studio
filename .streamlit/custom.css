@@ -23,44 +23,39 @@
     margin-bottom: 10px;
 }
 
-/* Barra de parámetro */
-.param-bar-wrap {
-    background: #1e1e2e;
-    border: 1px solid #2d2d44;
-    border-radius: 10px;
-    padding: 10px 14px;
+/* ── Barra de parámetro (v2) ──────────────────────────────────────────────── */
+.pbar-wrap {
+    background: #111122;
+    border: 1px solid #1c1c35;
+    border-radius: 12px;
+    padding: 12px 16px;
     margin-bottom: 8px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.param-bar-header {
+.pbar-wrap:hover {
+    border-color: #2a2a4a;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+}
+.pbar-header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 6px;
+    align-items: center;
+    margin-bottom: 8px;
 }
-.param-label { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
-.param-value { font-size: 1rem; font-weight: 700; color: #fff; }
-.param-bar-bg {
-    background: #252540;
-    border-radius: 6px;
-    height: 8px;
-    position: relative;
-    overflow: hidden;
+.pbar-label {
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #555;
 }
-.param-target-zone {
-    position: absolute;
-    top: 0; bottom: 0;
-    background: rgba(74,222,128,0.15);
-    border-left: 1.5px solid #4ade80;
-    border-right: 1.5px solid #4ade80;
+.pbar-value {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #f0f0ff;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
 }
-.param-bar-fill {
-    height: 100%;
-    border-radius: 6px;
-    transition: width 0.3s ease;
-}
-.bar-ok   { background: #4ade80; }
-.bar-warn { background: #fb923c; }
-.bar-err  { background: #f87171; }
 
 /* Badges */
 .badge {
