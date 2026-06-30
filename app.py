@@ -59,10 +59,10 @@ else:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-  <span style="font-size:2rem;">🍦</span>
+<div style="display:flex;align-items:center;gap:12px;padding:6px 0 8px;overflow:visible;">
+  <span style="font-size:2rem;line-height:1;display:block;">🍦</span>
   <div>
-    <div style="font-size:1.5rem;font-weight:800;color:#fff;line-height:1.1">Cepillao' Gelato Studio</div>
+    <div style="font-size:1.5rem;font-weight:800;color:#fff;line-height:1.2;">Cepillao' Gelato Studio</div>
     <div style="font-size:0.78rem;color:#666;">Motor científico · helados, gelato &amp; sorbetes</div>
   </div>
 </div>
