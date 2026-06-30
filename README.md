@@ -1,109 +1,140 @@
-# Cepillao' Studio — Despliegue en Railway
+# 🍦 Cepillao' Studio
+
+> Motor científico de formulación de helados y gelato con interfaz web en tiempo real.
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.35-FF4B4B?logo=streamlit&logoColor=white)
+![Railway](https://img.shields.io/badge/Deploy-Railway-0B0D0E?logo=railway&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## ¿Qué es?
+
+Cepillao' Studio es una aplicación web para formular helados y gelatos con rigor técnico. Ingresás los ingredientes, y el motor calcula en tiempo real la composición fisicoquímica completa: sólidos totales, grasa, MSNF, actividad de agua, crioscopía y poder anticongelante, generando diagnósticos automáticos y recomendaciones de estabilizantes según el tipo de producto y la máquina usada.
+
+Diseñado para heladerías artesanales y desarrollo de recetas que necesitan resultados reales, no aproximaciones.
+
+---
+
+## Funcionalidades
+
+| Módulo | Descripción |
+|--------|-------------|
+| **Formulador** | Composición en tiempo real: ST, grasa, MSNF, azúcares, POD, PAC, crioscopía (Raoult), Aw (Ross 1975) |
+| **Radar de parámetros** | Visualización inmediata del balance de la mezcla |
+| **Diagnósticos** | Alertas automáticas con recomendaciones por tipo de producto y máquina |
+| **Estabilizantes** | Sugerencias de dosificación basadas en la composición calculada |
+| **Ticket de producción** | Resumen imprimible con instrucciones paso a paso |
+| **Escalado** | Multiplicador de receta de ×0.25 a ×20 |
+| **Costos** | Precio por pote y por litro calculados automáticamente |
+| **Ninja Creami** | Soporte nativo con overrun mecánico fijo y cálculo de potes |
+| **Base de datos** | ~130 ingredientes precargados, recetas guardadas en SQLite local |
+
+---
+
+## Inicio rápido
+
+### Requisitos
+
+- Python 3.11 o superior
+
+### Instalación local
+
+```bash
+git clone https://github.com/zxdiegozx/Cepillao_Studio.git
+cd Cepillao_Studio
+
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+La app abre en `http://localhost:8501`.
+
+---
+
+## Despliegue en Railway
+
+El repositorio está listo para Railway con zero-config:
+
+1. Crear proyecto en [railway.app](https://railway.app) y conectar este repositorio
+2. Railway detecta el `Procfile` automáticamente y usa Nixpacks como builder
+3. Agregar un **Volume** montado en `/data` para persistir la base de datos entre deploys — Railway inyecta `RAILWAY_VOLUME_MOUNT_PATH` automáticamente
+
+Sin el volumen, la DB se resetea en cada redeploy. Con el volumen, los datos sobreviven indefinidamente.
+
+---
 
 ## Estructura del proyecto
 
 ```
-gelato_app/
-├── app.py                  # UI principal (Streamlit)
-├── calculator.py           # Motor de cálculo (sin dependencias)
-├── database.py             # Capa de datos SQLite
-├── test_calculator.py      # Tests unitarios
-├── requirements.txt        # Dependencias Python
-├── Procfile                # Comando de arranque para Railway
-├── railway.json            # Configuración de build
-├── .gitignore              # Archivos a excluir del repo
-└── .streamlit/
-    └── config.toml         # Configuración de Streamlit
+Cepillao_Studio/
+│
+├── app.py                      # Interfaz Streamlit (5 tabs)
+├── calculator.py               # Facade pública del motor
+├── constants.py                # Constantes y configuración global
+├── database.py                 # ORM SQLite + seed de ~130 ingredientes
+│
+├── engine/
+│   ├── __init__.py             # API pública re-exportada
+│   ├── calc_core.py            # Cálculo lineal de ingredientes
+│   ├── calc_cryoscopy.py       # Crioscopía — modelo Raoult simplificado
+│   ├── calc_nutrition.py       # Nutrición y overrun — factores Atwater
+│   ├── diagnostics.py          # Rangos objetivo y diagnósticos por combo
+│   └── ticket.py               # Generador de ticket de producción ASCII
+│
+├── test_calculator.py          # Suite de tests unitarios
+│
+├── .streamlit/
+│   ├── config.toml             # Configuración Streamlit (headless, CORS)
+│   └── custom.css              # Estilos dark mode de la interfaz
+│
+├── CALCULATOR_SCIENCE.md       # Documentación científica del motor
+├── requirements.txt
+├── Procfile                    # Comando de inicio para Railway
+└── railway.json                # Configuración del builder y restart policy
 ```
 
 ---
 
-## Despliegue paso a paso
+## Ciencia del motor
 
-### 1. Subir el código a GitHub
+El motor implementa modelos fisicoquímicos estándar de la industria heladera:
+
+- **Crioscopía**: descenso crioscópico por ley de Raoult simplificada (`ΔT = −1.86 × PAC_mol / kg_agua`)
+- **Actividad de agua**: modelo de Ross (1975) — producto de las Aw individuales
+- **Calorías**: factores Atwater modificados (grasa 9.0, proteína 3.5, azúcares 4.0, fibra 2.5, alcohol 7.0)
+- **Overrun**: cálculo diferencial de masa antes/después del mantecado; overrun fijo mecánico para Ninja Creami
+
+Documentación completa de fórmulas y referencias en [CALCULATOR_SCIENCE.md](CALCULATOR_SCIENCE.md).
+
+---
+
+## Tests
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/cepillao-studio.git
-git push -u origin main
+python -m pytest test_calculator.py -v
 ```
 
-### 2. Crear proyecto en Railway
-
-1. Ve a [railway.app](https://railway.app) e inicia sesión con GitHub
-2. Clic en **New Project → Deploy from GitHub repo**
-3. Selecciona tu repositorio `cepillao-studio`
-4. Railway detecta automáticamente el `Procfile` y empieza el build
-
-### 3. Añadir volumen persistente para la base de datos
-
-> Este paso es crítico. Sin él, la DB se borra cada vez que Railway reinicia el contenedor.
-
-1. En tu proyecto de Railway, clic en el servicio desplegado
-2. Ve a la pestaña **Volumes**
-3. Clic en **Add Volume**
-4. Configura:
-   - **Mount Path:** `/data`
-   - **Size:** 1 GB (suficiente para SQLite)
-5. Railway añade automáticamente la variable de entorno `RAILWAY_VOLUME_MOUNT_PATH=/data`
-
-La app detecta esta variable y guarda `gelato.db` en `/data/gelato.db`, que persiste entre deploys y reinicios.
-
-### 4. Verificar el despliegue
-
-1. Railway te da una URL pública tipo `cepillao-studio.up.railway.app`
-2. Abre la URL — la app debería arrancar en ~30 segundos
-3. La primera vez se inicializa la DB con los 69 ingredientes automáticamente
+La suite cubre: cálculo lineal, totales, porcentajes, diagnósticos, crioscopía, actividad de agua, nutrición, overrun y detección de alcohol.
 
 ---
 
-## Variables de entorno
+## Stack
 
-Railway gestiona `RAILWAY_VOLUME_MOUNT_PATH` automáticamente al añadir el volumen.
-No necesitas configurar ninguna variable adicional.
-
----
-
-## Desarrollo local
-
-```bash
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Arrancar la app
-streamlit run app.py
-
-# Correr los tests
-python test_calculator.py
-# o con pytest si está instalado:
-pytest test_calculator.py -v
-```
+| Capa | Tecnología |
+|------|-----------|
+| UI web | Streamlit 1.35 |
+| Visualización | Plotly 5.22 |
+| Tablas | Pandas 2.2 |
+| Base de datos | SQLite (stdlib) |
+| Deploy | Railway · Nixpacks |
 
 ---
 
-## Actualizaciones
+## Licencia
 
-Cada `git push` a `main` dispara un redeploy automático en Railway.
-La base de datos en el volumen **no se toca** durante el redeploy.
-
-```bash
-git add .
-git commit -m "Descripción del cambio"
-git push
-```
-
----
-
-## Solución de problemas
-
-**La app arranca pero la DB está vacía**
-→ Verifica que el volumen está montado en `/data` y que `RAILWAY_VOLUME_MOUNT_PATH` está definida en las variables de entorno del servicio.
-
-**Error de puerto**
-→ El `Procfile` ya usa `$PORT` automáticamente. Railway inyecta esta variable.
-
-**Build falla**
-→ Revisa que `requirements.txt` tiene exactamente los tres paquetes. Railway usa Nixpacks para detectar Python automáticamente.
+MIT © 2026 Diego Bracamonte

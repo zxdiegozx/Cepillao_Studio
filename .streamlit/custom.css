@@ -1,7 +1,4 @@
-/* Cepillao' Gelato Studio — custom.css
-   Colocar en: .streamlit/custom.css
-   Cargado en app.py con: pathlib.Path(__file__).parent / ".streamlit" / "custom.css"
-*/
+/* Cepillao' Gelato Studio — custom.css */
 
 /* Fondo general */
 .main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
