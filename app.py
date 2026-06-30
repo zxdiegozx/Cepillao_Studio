@@ -1,5 +1,6 @@
 import streamlit as st
 import calculator as calc
+import plotly.graph_objects as go
 from constants import (
     PRODUCT_TYPES, MACHINES,
     MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD, MACHINE_MANTECADORA,
@@ -197,6 +198,62 @@ def _card_close():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def _radar_chart(pct: dict, tg: dict):
+    labels   = ['ST', 'Grasa', 'MSNF', 'Azúcares', 'POD', 'PAC']
+    pct_keys = ['st_pct', 'fat_pct', 'msnf_pct', 'sugars_pct', 'pod_total', 'pac_total']
+    tg_keys  = ['st', 'fat', 'msnf', 'sugars', 'pod', 'pac']
+    smaxes   = [50, 25, 15, 35, 280, 400]
+
+    vals  = [pct.get(k, 0) for k in pct_keys]
+    tg_lo = [tg[k][0]      for k in tg_keys]
+    tg_hi = [tg[k][1]      for k in tg_keys]
+
+    def n(v, sm): return min(v / sm * 100, 100) if sm else 0
+
+    r_vals = [n(v, sm) for v, sm in zip(vals,  smaxes)]
+    r_lo   = [n(v, sm) for v, sm in zip(tg_lo, smaxes)]
+    r_hi   = [n(v, sm) for v, sm in zip(tg_hi, smaxes)]
+    theta  = labels + [labels[0]]
+
+    hover_vals = (
+        [f"ST {vals[0]:.1f}%", f"Grasa {vals[1]:.1f}%", f"MSNF {vals[2]:.1f}%",
+         f"Azúcares {vals[3]:.1f}%", f"POD {vals[4]:.0f}", f"PAC {vals[5]:.0f}"]
+    )
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=r_hi + [r_hi[0]], theta=theta, fill='none',
+        line=dict(color='rgba(74,222,128,0.45)', width=1.5, dash='dot'),
+        name='Máx objetivo', hoverinfo='skip',
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=r_lo + [r_lo[0]], theta=theta, fill='none',
+        line=dict(color='rgba(74,222,128,0.25)', width=1, dash='dot'),
+        name='Mín objetivo', hoverinfo='skip',
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=r_vals + [r_vals[0]], theta=theta,
+        fill='toself', fillcolor='rgba(96,165,250,0.18)',
+        line=dict(color='#60a5fa', width=2),
+        name='Receta',
+        text=hover_vals + [hover_vals[0]],
+        hovertemplate='%{text}<extra></extra>',
+    ))
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 100],
+                            showticklabels=False, gridcolor='#2d2d44'),
+            angularaxis=dict(tickfont=dict(size=11, color='#aaa'), gridcolor='#2d2d44'),
+            bgcolor='rgba(30,30,46,0.6)',
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        showlegend=False,
+        margin=dict(l=55, r=55, t=15, b=15),
+        height=255,
+    )
+    return fig
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # REC 2: HELPERS DEL FORMULADOR — nivel módulo
 # ═════════════════════════════════════════════════════════════════════════════
@@ -301,6 +358,11 @@ with tab_form:
         help="Opcional — validación con refractómetro"
     )
 
+    escala = st.sidebar.number_input(
+        "Escalar receta (×)", 0.25, 20.0, 1.0, step=0.25,
+        help="Multiplica todos los gramos para calcular producción a mayor/menor escala"
+    )
+
     st.sidebar.divider()
 
     # guardar_receta y guardar_como_base siguen dentro del tab
@@ -385,13 +447,16 @@ with tab_form:
         st.button("＋ Agregar fila", on_click=callback_add_row, use_container_width=True)
 
         if lines_for_calculator:
+            if escala != 1.0:
+                lines_for_calculator = [(ing, g * escala, p) for ing, g, p in lines_for_calculator]
             masa_tot  = sum(g for _, g, _ in lines_for_calculator)
             costo_tot = sum((g / 1000) * p for _, g, p in lines_for_calculator)
+            escala_txt = f" ×{escala:.2g}" if escala != 1.0 else ""
             st.markdown(f"""
             <div style="display:flex;gap:16px;padding:10px 14px;background:#181828;
                  border-radius:8px;margin-top:8px;border:1px solid #252540;">
               <div>
-                <div style="font-size:0.68rem;color:#666;text-transform:uppercase;">Masa total</div>
+                <div style="font-size:0.68rem;color:#666;text-transform:uppercase;">Masa total{escala_txt}</div>
                 <div style="font-size:1.1rem;font-weight:700;color:#fff;">{masa_tot:.0f} g</div>
               </div>
               <div>
@@ -542,6 +607,11 @@ with tab_form:
                 _param_bar("PAC", pct.get('pac_total', 0),
                            tg['pac'][0], tg['pac'][1], "", scale_max=400)
 
+            # ── RADAR DE COMPOSICIÓN ──────────────────────────────────────────
+            _section("🕸️ Radar de Composición")
+            st.plotly_chart(_radar_chart(pct, tg), use_container_width=True,
+                            config={'displayModeBar': False})
+
             # ── CRIOSCOPÍA + Aw ───────────────────────────────────────────────
             _section("❄️ Crioscopía  ·  💧 Actividad de Agua")
             dt      = derived.get("delta_t", 0)
@@ -621,6 +691,9 @@ with tab_form:
                 </div>""", unsafe_allow_html=True)
                 if or_d.get("masa_ultimo_pote_g", 0) > 10:
                     st.caption(f"🫙 Último pote: {or_d['masa_ultimo_pote_g']:.0f} g de base")
+                _n_potes = or_d['potes_completos'] + (1 if or_d.get('masa_ultimo_pote_g', 0) > 10 else 0)
+                if totals['cost'] > 0 and _n_potes > 0:
+                    st.caption(f"💰 Costo por pote: ${totals['cost'] / _n_potes:.2f}")
             else:
                 c1, c2 = st.columns(2)
                 c1.markdown(f"""<div class="comp-cell">
@@ -631,6 +704,8 @@ with tab_form:
                   <div class="comp-cell-label">Litros producidos</div>
                   <div class="comp-cell-val">{or_d['liters_from_base']:.2f} L</div>
                 </div>""", unsafe_allow_html=True)
+                if totals['cost'] > 0 and or_d['liters_from_base'] > 0:
+                    st.caption(f"💰 Costo por litro: ${totals['cost'] / or_d['liters_from_base']:.2f}")
 
             # ── VALIDACIÓN BRIX ───────────────────────────────────────────────
             if brix_medido > 0:
@@ -656,7 +731,8 @@ with tab_form:
             _section("🧪 Estabilizantes recomendados")
             stab_recs = calc.recommend_stabilizers(
                 totals, pct, product_type, machine,
-                ingredient_names=active_ingredient_names
+                ingredient_names=active_ingredient_names,
+                config=config_override or None,
             )
             if not stab_recs:
                 st.markdown("✅ Sistema de estabilización completo.")
@@ -709,10 +785,10 @@ with tab_form:
                         f"{f.get('proteina_g', 0):.1f} g proteína</div>",
                         unsafe_allow_html=True
                     )
-                if prot_data.get('sugerencias'):
-                    for s in prot_data['sugerencias']:
+                if prot_data.get('recomendaciones'):
+                    for s in prot_data['recomendaciones']:
                         st.markdown(
-                            f"<div style='font-size:0.78rem;color:#60a5fa;'>{s['text']}</div>",
+                            f"<div style='font-size:0.78rem;color:#60a5fa;'>{s['texto']}</div>",
                             unsafe_allow_html=True
                         )
 

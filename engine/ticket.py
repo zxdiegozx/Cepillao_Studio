@@ -35,7 +35,7 @@ def format_production_ticket(recipe_name: str, product_type: str, machine: str,
         _header(recipe_name, product_type, machine),
         _block_ingredientes(lines_for_calculator, m),
         _block_composicion(pct, totals, targets, derived),
-        _block_calorias(kcal),
+        _block_calorias(kcal, totals.get('cost', 0)),
         _block_produccion(m, machine, is_creami, derived),
         _block_diagnosticos(derived),
         _instrucciones(is_creami),
@@ -109,7 +109,7 @@ def _block_composicion(pct: dict, totals: dict, targets: dict, derived: dict) ->
     )
 
 
-def _block_calorias(kcal: dict) -> str:
+def _block_calorias(kcal: dict, cost: float = 0.0) -> str:
     cal   = kcal.get('clasificacion_calorica')
     prot  = kcal.get('clasificacion_proteica')
     lines = [f"\nCALORÍAS / NUTRICIÓN:"]
@@ -119,7 +119,8 @@ def _block_calorias(kcal: dict) -> str:
     lines.append(cal_line)
     if prot:
         lines.append(f"  Proteína:       {prot['valor']:.1f} g/100g  {prot['emoji']} {prot['etiqueta']}")
-    lines.append(f"  Costo estimado: ${kcal.get('cost', 0):.2f}" if 'cost' in kcal else '')
+    if cost > 0:
+        lines.append(f"  Costo estimado: ${cost:.2f}")
     return '\n'.join(l for l in lines if l)
 
 
