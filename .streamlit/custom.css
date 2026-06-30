@@ -1,7 +1,10 @@
 /* Cepillao' Gelato Studio — custom.css */
 
 /* Fondo general */
-.main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+.main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+
+/* Evita que Streamlit clipee el header con emoji grande */
+[data-testid="stMarkdownContainer"] { overflow: visible; }
 
 /* Tarjeta de sección en el panel de análisis */
 .gelato-card {
