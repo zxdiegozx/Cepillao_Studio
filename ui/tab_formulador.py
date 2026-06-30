@@ -196,8 +196,16 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
     config_override = st.session_state.config_params.get(f"{product_type}_{machine}", {})
 
     if not lines_for_calculator:
-        tg = targets_default
-        st.markdown('<div class="section-overline">📊 Rangos objetivo</div>', unsafe_allow_html=True)
+        # FIX: el preview de rangos debe reflejar la config manual del usuario,
+        # no solo los defaults. Antes hacía `tg = targets_default` y por eso
+        # "ajustar no repercutía" mientras no hubiera ingredientes cargados:
+        # el bloque de abajo siempre mostraba los valores de fábrica.
+        tg = dict(targets_default)
+        for _k in ('st', 'fat', 'msnf', 'sugars', 'pod', 'pac', 'st_water'):
+            if _k in config_override:
+                tg[_k] = config_override[_k]
+        _ov = ' · ⚙️ personalizado' if config_override else ''
+        st.markdown(f'<div class="section-overline">📊 Rangos objetivo{_ov}</div>', unsafe_allow_html=True)
         st.markdown(f"""
         <div class="comp-grid">
           <div class="comp-cell"><div class="comp-cell-label">ST</div>
