@@ -335,12 +335,12 @@ def overrun_calc(base_grams: float, overrun_pct: float,
     """
     Calcula rendimiento por máquina.
 
-    Ninja Creami: overrun fijo mecánico (~40-60%). No es configurable.
+    Ninja Creami: overrun fijo mecánico (~5-15%, empírico real). No es configurable.
     Mantecadora:  overrun configurable por el formulador.
 
     La densidad del helado con overrun es 1/(1+or_factor) g/mL:
       - 0% overrun  → 1.00 g/mL
-      - 50% overrun → 0.67 g/mL  (Creami Deluxe)
+      - 10% overrun → 0.91 g/mL  (Creami — empírico real)
       - 100%        → 0.50 g/mL  (industrial)
     """
     is_creami = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)

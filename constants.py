@@ -35,8 +35,8 @@ MACHINES = [
 
 # ── Overrun fijo estimado Ninja Creami (no configurable — es mecánico) ────────
 CREAMI_OVERRUN_PCT = {
-    MACHINE_CREAMI_DELUXE:   50,   # 40-60%, mediana empírica
-    MACHINE_CREAMI_STANDARD: 45,   # 35-55%, mediana empírica
+    MACHINE_CREAMI_DELUXE:   10,   # empírico real: 5-15%
+    MACHINE_CREAMI_STANDARD: 10,   # empírico real: 5-15%
 }
 
 # ── Prioridades de diagnóstico ────────────────────────────────────────────────

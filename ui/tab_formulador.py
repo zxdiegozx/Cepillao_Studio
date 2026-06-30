@@ -1,6 +1,7 @@
 import streamlit as st
 import calculator as calc
 import database as db
+import restricciones
 from constants import (
     PRODUCT_TYPES, MACHINES,
     MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD,
@@ -233,8 +234,11 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
         config=config_override or None,
         alcohol_lines=alcohol_lines,
     )
-    kcal      = calc.calc_calories(totals, lines_for_calculator, alcohol_lines=alcohol_lines)
-    prot_data = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
+    kcal         = calc.calc_calories(totals, lines_for_calculator, alcohol_lines=alcohol_lines)
+    prot_data    = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
+    restricciones_activas = restricciones.verificar(
+        lines_for_calculator, totals, pct, product_type, machine
+    )
     tg   = derived.get('targets', targets_default)
     or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
 
@@ -408,6 +412,46 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
                                f'<div class="diag-title">🔵 {d["title"]}</div>'
                                f'<div class="diag-tip">{d["tip"]}</div></div>')
             st.markdown(_diag_html, unsafe_allow_html=True)
+
+    # ── RESTRICCIONES ─────────────────────────────────────────────────────────
+    if restricciones_activas:
+        _section("🚫 Restricciones de Formulación")
+        _tipo_icon = {
+            'incompatibilidad': '⚡',
+            'cota_superior':    '🔺',
+            'contexto':         '🏷️',
+            'proceso':          '🔧',
+        }
+        _sev_class = {
+            'critico':    'diag-critical',
+            'importante': 'diag-important',
+            'ajustable':  'diag-adjustable',
+        }
+        _sev_dot = {
+            'critico':    '🔴',
+            'importante': '🟠',
+            'ajustable':  '🔵',
+        }
+        _rest_html = ""
+        for r in restricciones_activas:
+            sev   = r['severidad']
+            icon  = _tipo_icon.get(r['tipo'], '⚠️')
+            dot   = _sev_dot.get(sev, '⚪')
+            clase = _sev_class.get(sev, 'diag-adjustable')
+            ings  = r.get('ingredientes', [])
+            ings_html = (
+                f'<div style="font-size:0.7rem;color:#666;margin-top:3px;">'
+                f'Ingredientes: {", ".join(ings[:4])}</div>'
+                if ings else ""
+            )
+            _rest_html += (
+                f'<div class="diag-item {clase}">'
+                f'<div class="diag-title">{dot} {icon} {r["titulo"]}</div>'
+                f'<div class="diag-tip">{r["detalle"]}</div>'
+                f'{ings_html}'
+                f'</div>'
+            )
+        st.markdown(_rest_html, unsafe_allow_html=True)
 
     # ── OVERRUN ───────────────────────────────────────────────────────────────
     _section("📐 Rendimiento / Overrun")

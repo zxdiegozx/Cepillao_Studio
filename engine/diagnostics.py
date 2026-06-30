@@ -161,9 +161,10 @@ def calc_derived(totals: dict, pct: dict,
              "Mezcla muy concentrada → overrun bajo y textura densa. "
              "Añade leche líquida o agua hasta 54-62%.")
         diag(PRIORITY_ADJUSTABLE, 'creami_overrun_hint', True,
-             f"Overrun estimado Ninja Creami: ~{CREAMI_OVERRUN_PCT.get(machine, 50)}%",
-             f"La {machine} incorpora aire mecánicamente. "
-             "ST 28-35% → overrun 50-65% (ligero). ST 35-40% → overrun 35-45% (denso).")
+             f"Overrun estimado Ninja Creami: ~{CREAMI_OVERRUN_PCT.get(machine, 10)}%",
+             f"La {machine} incorpora poco aire — overrun real empírico 5–15%. "
+             "No compares con mantecadoras industriales (30–100%). "
+             "El volumen final es casi idéntico al de la base congelada.")
 
     # ── Diagnósticos Mantecadora ──────────────────────────────────────────────
     if not is_creami:
