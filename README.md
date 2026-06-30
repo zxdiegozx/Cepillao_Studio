@@ -73,12 +73,12 @@ Sin el volumen, la DB se resetea en cada redeploy. Con el volumen, los datos sob
 ```
 Cepillao_Studio/
 │
-├── app.py                      # Interfaz Streamlit (5 tabs)
+├── app.py                      # Bootstrap: setup, CSS, tabs, llamada a ui/
 ├── calculator.py               # Facade pública del motor
 ├── constants.py                # Constantes y configuración global
 ├── database.py                 # ORM SQLite + seed de ~130 ingredientes
 │
-├── engine/
+├── engine/                     # Motor de cálculo (puro Python, sin Streamlit)
 │   ├── __init__.py             # API pública re-exportada
 │   ├── calc_core.py            # Cálculo lineal de ingredientes
 │   ├── calc_cryoscopy.py       # Crioscopía — modelo Raoult simplificado
@@ -86,13 +86,21 @@ Cepillao_Studio/
 │   ├── diagnostics.py          # Rangos objetivo y diagnósticos por combo
 │   └── ticket.py               # Generador de ticket de producción ASCII
 │
+├── ui/                         # Capa de interfaz modular (Streamlit)
+│   ├── __init__.py             # Re-exporta render_* de cada tab
+│   ├── components.py           # Helpers compartidos: barras, radar, callbacks
+│   ├── tab_formulador.py       # Tab 1 — Formulador + panel de análisis
+│   ├── tab_recetas.py          # Tab 2 — Mis Recetas
+│   ├── tab_bases.py            # Tab 3 — Bases de Helado
+│   ├── tab_ingredientes.py     # Tab 4 — Gestión de ingredientes
+│   └── tab_config.py           # Tab 5 — Configuración de rangos
+│
 ├── test_calculator.py          # Suite de tests unitarios
 │
 ├── .streamlit/
 │   ├── config.toml             # Configuración Streamlit (headless, CORS)
 │   └── custom.css              # Estilos dark mode de la interfaz
 │
-├── CALCULATOR_SCIENCE.md       # Documentación científica del motor
 ├── requirements.txt
 ├── Procfile                    # Comando de inicio para Railway
 └── railway.json                # Configuración del builder y restart policy
