@@ -74,6 +74,13 @@ def get_targets(product_type: str = 'Helado/Gelato',
     }
 
 
+def _apply_config(targets: dict, config: dict | None) -> None:
+    if config:
+        for key in ('st', 'fat', 'msnf', 'sugars', 'pod', 'pac', 'st_water'):
+            if key in config:
+                targets[key] = config[key]
+
+
 def _status(val: float, lo, hi) -> str:
     """Semáforo de rango: 'empty' | 'low' | 'ok' | 'high'."""
     if val == 0 and lo is not None and lo > 0:
@@ -93,7 +100,8 @@ def calc_derived(totals: dict, pct: dict,
                  product_type: str = 'Helado/Gelato',
                  machine: str = 'Ninja Creami Deluxe',
                  lines_with_ings: list = None,
-                 config: dict = None) -> dict:
+                 config: dict = None,
+                 alcohol_lines: list = None) -> dict:
     """
     Calcula métricas derivadas y genera diagnósticos priorizados.
 
@@ -105,10 +113,7 @@ def calc_derived(totals: dict, pct: dict,
 
     is_creami = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
     targets   = get_targets(product_type, machine)
-    if config:
-        for key in ('st', 'fat', 'msnf', 'sugars', 'pod', 'pac', 'st_water'):
-            if key in config:
-                targets[key] = config[key]
+    _apply_config(targets, config)
 
     st_lo,  st_hi  = targets['st']
     fat_lo, fat_hi = targets['fat']
@@ -139,10 +144,10 @@ def calc_derived(totals: dict, pct: dict,
     zona = crio['crio_zona']
 
     # ── Alcohol ───────────────────────────────────────────────────────────────
-    alcohol_lines   = _detect_alcohol_lines(lines_with_ings or [])
-    ethanol_total_g = sum(a['ethanol_g'] for a in alcohol_lines)
+    alc             = alcohol_lines if alcohol_lines is not None else _detect_alcohol_lines(lines_with_ings or [])
+    ethanol_total_g = sum(a['ethanol_g'] for a in alc)
     ethanol_pct_mix = ethanol_total_g / m * 100 if m else 0
-    nombres_alcohol = ', '.join(a['ingredient_name'] for a in alcohol_lines)
+    nombres_alcohol = ', '.join(a['ingredient_name'] for a in alc)
 
     # ── Diagnósticos Creami ───────────────────────────────────────────────────
     if is_creami:
@@ -212,7 +217,7 @@ def calc_derived(totals: dict, pct: dict,
 
     # ── Alcohol ───────────────────────────────────────────────────────────────
     alcohol_detected = None
-    if alcohol_lines:
+    if alc:
         diag(PRIORITY_CRITICAL, 'alcohol_exceso', ethanol_pct_mix > 4.0,
              f"Alcohol {ethanol_pct_mix:.1f}% etanol → NO CONGELA",
              f"Ingredientes: {nombres_alcohol}. Supera 4% → punto de congelación "
@@ -224,7 +229,7 @@ def calc_derived(totals: dict, pct: dict,
              f"Alcohol {ethanol_pct_mix:.1f}% etanol — dosis correcta",
              f"Ingredientes: {nombres_alcohol}. Dentro del rango seguro.")
         alcohol_detected = {
-            'lines':           alcohol_lines,
+            'lines':           alc,
             'ethanol_total_g': round(ethanol_total_g, 1),
             'ethanol_pct':     round(ethanol_pct_mix,  2),
         }
@@ -290,10 +295,7 @@ def recommend_stabilizers(totals: dict, pct: dict, product_type: str,
     is_creami = machine in (MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD)
     is_sorbet = product_type in (PRODUCT_SORBETE, PRODUCT_GRANITA)
     targets   = get_targets(product_type, machine)
-    if config:
-        for key in ('st', 'fat', 'msnf', 'sugars', 'pod', 'pac', 'st_water'):
-            if key in config:
-                targets[key] = config[key]
+    _apply_config(targets, config)
 
     st_pct    = pct.get('st_pct',    0)
     water_pct = pct.get('water_pct', 0)

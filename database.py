@@ -64,6 +64,75 @@ CREATE TABLE IF NOT EXISTS user_config (
 );
 """
 
+def _migrate_categories_v7(conn):
+    """Normaliza las categorías del seed a las entradas canónicas de INGREDIENT_CATEGORIES."""
+    updates = [
+        ("Lácteo – Leche líquida",   ["Leche entera 3.5%", "Leche semidescremada 1.5%",
+            "Leche descremada 0.1%", "Leche entera deslactosada", "Leche descremada deslactosada",
+            "Leche condensada azucarada", "Leche condensada sin azúcar", "Leche evaporada 7.5%"]),
+        ("Lácteo – Crema / Nata",    ["Crema de leche 25% MG", "Crema de leche 35% MG",
+            "Crema de leche 48% MG", "Mantequilla 82% MG", "Mantequilla sin sal 84%",
+            "Natulac 25% MG"]),
+        ("Lácteo – Leche en polvo",  ["Leche en polvo entera", "Leche en polvo descremada",
+            "Leche en polvo deslactosada", "Suero de leche en polvo"]),
+        ("Lácteo – Queso / Ricotta", ["Mascarpone 41% MG", "Queso crema 30% MG", "Ricotta entera"]),
+        ("Lácteo – Otro",            ["Yogur griego 10% MG", "Yogur entero 3.5%"]),
+        ("Vegetal – Leche vegetal",  ["Leche de coco entera 17%", "Leche de coco light 5%",
+            "Leche de almendra sin azúcar", "Leche de avena", "Leche de soja", "Leche de macadamia"]),
+        ("Vegetal – Crema vegetal",  ["Crema de coco 24%", "Crema de avena (barista)"]),
+        ("Vegetal – Fruta fresca / congelada", [
+            "Mango (pulpa fresca)", "Maracuyá (pulpa con semilla)", "Parchita/Fruta de la pasión",
+            "Guayaba (pulpa)", "Piña (pulpa fresca)", "Cambur/Banana (maduro)",
+            "Papaya/Lechosa (pulpa)", "Aguacate (pulpa)", "Tamarindo (pulpa)", "Lulo (pulpa)",
+            "Carambola (pulpa)", "Mango (enlatado en almíbar)", "Piña (enlatada en jugo)",
+            "Fresa (pulpa)", "Frambuesa (pulpa)", "Arándano (blueberry)", "Mora (blackberry)",
+            "Limón (jugo fresco)", "Naranja (jugo fresco)", "Durazno/Melocotón (fresco)",
+            "Durazno (enlatado en almíbar)", "Cereza maraschino (enlatada)"]),
+        ("Vegetal – Fruta seca",     ["Coco rallado seco"]),
+        ("Azúcar – Sacarosa",        ["Sacarosa"]),
+        ("Azúcar – Dextrosa / Glucosa", ["Dextrosa monohidrato"]),
+        ("Azúcar – Fructosa",        ["Fructosa"]),
+        ("Azúcar – Trehalosa",       ["Trehalosa"]),
+        ("Azúcar – Alulosa",         ["Alulosa"]),
+        ("Azúcar – Eritritol",       ["Eritritol"]),
+        ("Azúcar – Azúcar invertido",["Azúcar invertido"]),
+        ("Azúcar – Glucosa líquida / DE40", ["Glucosa líquida DE40", "Glucosa atomizada DE60"]),
+        ("Azúcar – Otro",            ["Miel de abeja", "Isomalt", "Xilitol", "Maltitol",
+            "Panela rallada", "Melaza"]),
+        ("Estabilizante – Goma",     ["Goma Xantana", "Goma Guar", "LBG (algarroba)", "Agar-agar",
+            "Gelatina sin sabor (200 bloom)", "Neutro para helado (mezcla)"]),
+        ("Estabilizante – CMC / Celulosa", ["CMC (carboximetilcelulosa)"]),
+        ("Estabilizante – Pectina",  ["Pectina LM 99%", "Pectina HM"]),
+        ("Estabilizante – Almidón modificado", ["Almidón modificado"]),
+        ("Estabilizante – Otro",     ["Inulina HP"]),
+        ("Proteína – Suero (WPC/WPI)", ["WPC 80% (suero concentrado)", "WPI 90% (suero aislado)"]),
+        ("Proteína – Caseína / MPC", ["Caseína micelar (MPC 85)"]),
+        ("Proteína – Vegetal",       ["Proteína de guisante (pea)"]),
+        ("Proteína – Huevo",         ["Clara de huevo en polvo"]),
+        ("Vegetal – Otro",           ["Aceite de coco virgen", "Aceite neutro (maíz/girasol)"]),
+        ("Saborizante – Cacao / Chocolate", [
+            "Cacao polvo sin azúcar natural", "Cacao polvo alcalinizado", "Pasta de cacao 100%",
+            "Manteca de cacao", "Chocolate Savoy 46% cacao", "Cobertura negra 70% cacao",
+            "Cobertura negra 55% cacao", "Cobertura blanca", "Cobertura de leche 38%",
+            "Chips de chocolate 50%", "Cacao en polvo Savoy"]),
+        ("Saborizante – Pasta / Base", [
+            "Pasta de pistacho (100%)", "Pasta de avellana (100%)", "Pasta de almendra (100%)",
+            "Mantequilla de maní", "Crema de pistacho (azucarada)", "Praliné de avellana",
+            "Pasta de vainilla", "Matcha en polvo (ceremonial)", "Dulce de leche"]),
+        ("Saborizante – Extracto / Esencia", [
+            "Extracto de vainilla (puro)", "Café espresso (concentrado)", "Café soluble (polvo)"]),
+        ("Saborizante – Especias",   ["Canela en polvo"]),
+        ("Otro",                     ["Ácido cítrico en polvo", "Ácido málico",
+            "Sal marina fina", "Bicarbonato de sodio"]),
+    ]
+    for new_cat, names in updates:
+        placeholders = ','.join('?' * len(names))
+        conn.execute(
+            f"UPDATE ingredients SET category=? WHERE name IN ({placeholders})",
+            [new_cat, *names]
+        )
+
+
 MIGRATIONS = [
     (1, "ALTER TABLE ingredients ADD COLUMN price_per_kg REAL DEFAULT 0",
         "Añade precio por kg a ingredientes"),
@@ -82,6 +151,8 @@ MIGRATIONS = [
          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
      )""",
      "Tabla user_config — rangos personalizados por tipo/máquina persistidos en BD"),
+    (7, _migrate_categories_v7,
+     "Normaliza categorías del seed a INGREDIENT_CATEGORIES canónicas"),
 ]
 
 _SEED_MIGRATION_VERSION = 5
@@ -94,160 +165,182 @@ _SEED_MIGRATION_VERSION = 5
 DB_DATA = [
 
     # ══════════════════════════════════════════════════════════════════════════
-    # BASE LÁCTEA
+    # LÁCTEO — LECHE LÍQUIDA
     # ══════════════════════════════════════════════════════════════════════════
-    ("Leche entera 3.5%",           "Base láctea", 3.5,  9.0,  4.7,  0.0, 0.10, 0.10, 82.8,
+    ("Leche entera 3.5%",           "Lácteo – Leche líquida", 3.5,  9.0,  4.7,  0.0, 0.10, 0.10, 82.8,
      "Emulsión O/W natural, lactosa 4.7%, pH 6.6",          "Base principal",         0,  6.6),
-    ("Leche semidescremada 1.5%",   "Base láctea", 1.5,  9.3,  4.8,  0.0, 0.10, 0.10, 84.4,
+    ("Leche semidescremada 1.5%",   "Lácteo – Leche líquida", 1.5,  9.3,  4.8,  0.0, 0.10, 0.10, 84.4,
      "Equilibrio grasa/MSNF, deslactosada disponible",      "Base media grasa",       0,  6.6),
-    ("Leche descremada 0.1%",       "Base láctea", 0.1,  9.5,  4.8,  0.0, 0.10, 0.10, 85.6,
+    ("Leche descremada 0.1%",       "Lácteo – Leche líquida", 0.1,  9.5,  4.8,  0.0, 0.10, 0.10, 85.6,
      "Alta MSNF sin grasa, máx proteína",                   "Base baja grasa",        0,  6.6),
-    ("Leche entera deslactosada",   "Base láctea", 3.5,  9.0,  4.7,  0.0, 0.10, 0.10, 82.8,
+    ("Leche entera deslactosada",   "Lácteo – Leche líquida", 3.5,  9.0,  4.7,  0.0, 0.10, 0.10, 82.8,
      "Lactosa hidrolizada→glucosa+galactosa, más dulce",    "Base para intolerantes", 0,  6.6),
-    ("Leche descremada deslactosada","Base láctea",0.1,  9.5,  4.8,  0.0, 0.10, 0.10, 85.6,
+    ("Leche descremada deslactosada","Lácteo – Leche líquida",0.1,  9.5,  4.8,  0.0, 0.10, 0.10, 85.6,
      "Sin lactosa, sin grasa, MSNF alto",                   "Base light intolerante", 0,  6.6),
-    ("Leche condensada azucarada",  "Base láctea", 8.5,  20.0, 55.0, 0.0, 0.55, 0.55, 26.5,
+    ("Leche condensada azucarada",  "Lácteo – Leche líquida", 8.5,  20.0, 55.0, 0.0, 0.55, 0.55, 26.5,
      "Azúcar añadida ~44%, muy concentrada, POD alto",      "Dulzor + sólidos altos", 0,  6.3),
-    ("Leche condensada sin azúcar", "Base láctea", 7.5,  20.0, 11.0, 0.0, 0.22, 0.22, 61.5,
+    ("Leche condensada sin azúcar", "Lácteo – Leche líquida", 7.5,  20.0, 11.0, 0.0, 0.22, 0.22, 61.5,
      "Leche evaporada 2.5x, MSNF concentrado",              "Aumentar sólidos lácteos",0, 6.5),
-    ("Leche evaporada 7.5%",        "Base láctea", 7.5,  17.0, 10.0, 0.0, 0.20, 0.20, 65.5,
+    ("Leche evaporada 7.5%",        "Lácteo – Leche líquida", 7.5,  17.0, 10.0, 0.0, 0.20, 0.20, 65.5,
      "Concentrada 2x, sin azúcar añadida",                  "Sólidos sin dulzor extra",0, 6.5),
-    ("Crema de leche 25% MG",       "Base láctea", 25.0, 7.0,  4.0,  0.0, 0.04, 0.04, 64.0,
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LÁCTEO — CREMA / NATA
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Crema de leche 25% MG",       "Lácteo – Crema / Nata", 25.0, 7.0,  4.0,  0.0, 0.04, 0.04, 64.0,
      "Crema media, común en Venezuela/LatAm",               "Grasa moderada",         0,  6.5),
-    ("Crema de leche 35% MG",       "Base láctea", 35.0, 6.0,  3.5,  0.0, 0.04, 0.04, 55.5,
+    ("Crema de leche 35% MG",       "Lácteo – Crema / Nata", 35.0, 6.0,  3.5,  0.0, 0.04, 0.04, 55.5,
      "Globos grasos 3-8µm, pasteurizar 85°C/15s",           "Fuente grasa primaria",  0,  6.5),
-    ("Crema de leche 48% MG",       "Base láctea", 48.0, 4.0,  2.5,  0.0, 0.03, 0.03, 45.5,
+    ("Crema de leche 48% MG",       "Lácteo – Crema / Nata", 48.0, 4.0,  2.5,  0.0, 0.03, 0.03, 45.5,
      "Ultra-grasa, para semifreddo y bases ricas",          "Grasa máxima",           0,  6.5),
-    ("Leche en polvo entera",       "Base láctea", 26.0, 38.0, 37.5, 0.0, 0.38, 0.38,  1.0,
-     "Higroscópica, añadir en seco con azúcares",           "Concentrar MSNF+ST",     0,  6.8),
-    ("Leche en polvo descremada",   "Base láctea",  1.0, 52.0, 50.0, 0.0, 0.50, 0.50,  3.0,
-     "Proteínas 34%, lactosa 50%, MSNF puro",               "Aumentar MSNF sin grasa",0,  6.8),
-    ("Leche en polvo deslactosada", "Base láctea",  1.0, 52.0,  2.0, 0.0, 0.05, 0.05,  3.0,
-     "Lactosa hidrolizada, MSNF proteico concentrado",      "MSNF sin lactosa",       0,  6.8),
-    ("Mantequilla 82% MG",          "Base láctea", 82.0,  1.5,  0.6, 0.0, 0.01, 0.01, 15.9,
+    ("Mantequilla 82% MG",          "Lácteo – Crema / Nata", 82.0,  1.5,  0.6, 0.0, 0.01, 0.01, 15.9,
      "Cristalización Forma β', sabor intenso",              "Ajuste fino grasa",      0,  6.5),
-    ("Mantequilla sin sal 84%",     "Base láctea", 84.0,  1.2,  0.5, 0.0, 0.01, 0.01, 14.3,
+    ("Mantequilla sin sal 84%",     "Lácteo – Crema / Nata", 84.0,  1.2,  0.5, 0.0, 0.01, 0.01, 14.3,
      "Sin sal, más pura, para salsas y bases neutras",      "Grasa + sabor neutro",   0,  6.5),
-    ("Mascarpone 41% MG",           "Base láctea", 41.0,  5.0,  3.5, 0.0, 0.04, 0.04, 50.5,
-     "Ácido cítrico, pH 5.5, textura untuosa",              "Gelato ricco",           0,  5.5),
-    ("Queso crema 30% MG",          "Base láctea", 30.0,  8.0,  3.8, 0.0, 0.04, 0.04, 58.2,
-     "Philadelphia-style, pH 4.5-5.0",                     "Textura densa",          0,  4.8),
-    ("Ricotta entera",              "Base láctea", 13.0,  9.0,  3.0, 0.0, 0.03, 0.03, 75.0,
-     "Suero+leche, granulosa → licuar",                     "Cuerpo, proteína",       0,  6.2),
-    ("Yogur griego 10% MG",         "Base láctea", 10.0, 10.0,  4.0, 0.0, 0.04, 0.04, 76.0,
-     "Colado, pH 4.0-4.5, proteína alta ~10%",              "Frescura + proteína",    0,  4.2),
-    ("Yogur entero 3.5%",           "Base láctea",  3.5,  9.0,  4.7, 0.0, 0.10, 0.10, 82.8,
-     "Ácido láctico, pH 4.0-4.5",                           "Acidez, frescura",       0,  4.2),
-    ("Suero de leche en polvo",     "Base láctea",  1.5, 72.0, 70.0, 0.0, 0.70, 0.70,  4.0,
-     "WPC 35%, lactosa alta 70%",                           "Sólidos económicos",     0,  6.5),
-    ("Natulac 25% MG",              "Base láctea", 25.0,  7.5,  4.0, 0.5, 0.04, 0.04, 63.0,
+    ("Natulac 25% MG",              "Lácteo – Crema / Nata", 25.0,  7.5,  4.0, 0.5, 0.04, 0.04, 63.0,
      "Crema pasteurizada venezolana con carragenina — NO combinar con CMC+fruta ácida",
      "Crema local",                 0,  6.5),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # BASE VEGETAL
+    # LÁCTEO — LECHE EN POLVO
     # ══════════════════════════════════════════════════════════════════════════
-    ("Leche de coco entera 17%",    "Base vegetal", 17.5,  0.0,  3.8,  1.5, 0.04, 0.05, 77.2,
+    ("Leche en polvo entera",       "Lácteo – Leche en polvo", 26.0, 38.0, 37.5, 0.0, 0.38, 0.38,  1.0,
+     "Higroscópica, añadir en seco con azúcares",           "Concentrar MSNF+ST",     0,  6.8),
+    ("Leche en polvo descremada",   "Lácteo – Leche en polvo",  1.0, 52.0, 50.0, 0.0, 0.50, 0.50,  3.0,
+     "Proteínas 34%, lactosa 50%, MSNF puro",               "Aumentar MSNF sin grasa",0,  6.8),
+    ("Leche en polvo deslactosada", "Lácteo – Leche en polvo",  1.0, 52.0,  2.0, 0.0, 0.05, 0.05,  3.0,
+     "Lactosa hidrolizada, MSNF proteico concentrado",      "MSNF sin lactosa",       0,  6.8),
+    ("Suero de leche en polvo",     "Lácteo – Leche en polvo",  1.5, 72.0, 70.0, 0.0, 0.70, 0.70,  4.0,
+     "WPC 35%, lactosa alta 70%",                           "Sólidos económicos",     0,  6.5),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LÁCTEO — QUESO / RICOTTA
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Mascarpone 41% MG",           "Lácteo – Queso / Ricotta", 41.0,  5.0,  3.5, 0.0, 0.04, 0.04, 50.5,
+     "Ácido cítrico, pH 5.5, textura untuosa",              "Gelato ricco",           0,  5.5),
+    ("Queso crema 30% MG",          "Lácteo – Queso / Ricotta", 30.0,  8.0,  3.8, 0.0, 0.04, 0.04, 58.2,
+     "Philadelphia-style, pH 4.5-5.0",                     "Textura densa",          0,  4.8),
+    ("Ricotta entera",              "Lácteo – Queso / Ricotta", 13.0,  9.0,  3.0, 0.0, 0.03, 0.03, 75.0,
+     "Suero+leche, granulosa → licuar",                     "Cuerpo, proteína",       0,  6.2),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LÁCTEO — OTRO
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Yogur griego 10% MG",         "Lácteo – Otro", 10.0, 10.0,  4.0, 0.0, 0.04, 0.04, 76.0,
+     "Colado, pH 4.0-4.5, proteína alta ~10%",              "Frescura + proteína",    0,  4.2),
+    ("Yogur entero 3.5%",           "Lácteo – Otro",  3.5,  9.0,  4.7, 0.0, 0.10, 0.10, 82.8,
+     "Ácido láctico, pH 4.0-4.5",                           "Acidez, frescura",       0,  4.2),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # VEGETAL — LECHE VEGETAL
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Leche de coco entera 17%",    "Vegetal – Leche vegetal", 17.5,  0.0,  3.8,  1.5, 0.04, 0.05, 77.2,
      "Ácido láurico, emulsión natural estable, cremosa",    "Base vegana grasa",      0,  6.5),
-    ("Leche de coco light 5%",      "Base vegetal",  5.0,  0.0,  3.5,  0.8, 0.04, 0.05, 90.7,
+    ("Leche de coco light 5%",      "Vegetal – Leche vegetal",  5.0,  0.0,  3.5,  0.8, 0.04, 0.05, 90.7,
      "Reducida en grasa, textura más ligera",               "Base vegana light",      0,  6.5),
-    ("Crema de coco 24%",           "Base vegetal", 24.0,  0.0,  4.0,  1.5, 0.04, 0.05, 70.5,
-     "Más concentrada, baja agua",                          "Grasa vegana alta",      0,  6.5),
-    ("Leche de almendra sin azúcar","Base vegetal",  1.1,  0.0,  0.2,  0.5, 0.00, 0.00, 98.2,
+    ("Leche de almendra sin azúcar","Vegetal – Leche vegetal",  1.1,  0.0,  0.2,  0.5, 0.00, 0.00, 98.2,
      "Muy baja en calorías y sólidos, agua principalmente", "Base vegana neutra",     0,  7.0),
-    ("Leche de avena",              "Base vegetal",  1.5,  0.0,  4.5,  6.5, 0.05, 0.07, 87.5,
+    ("Leche de avena",              "Vegetal – Leche vegetal",  1.5,  0.0,  4.5,  6.5, 0.05, 0.07, 87.5,
      "Beta-glucanos, textura cremosa natural, almidón",     "Base vegana cremosa",    0,  6.8),
-    ("Leche de soja",               "Base vegetal",  1.8,  0.0,  1.2,  3.5, 0.01, 0.02, 93.5,
+    ("Leche de soja",               "Vegetal – Leche vegetal",  1.8,  0.0,  1.2,  3.5, 0.01, 0.02, 93.5,
      "Proteína 3.5%, isoflavonas, sabor neutro",            "Proteína vegana",        0,  7.0),
-    ("Leche de macadamia",          "Base vegetal",  4.5,  0.0,  1.0,  1.0, 0.01, 0.01, 93.5,
+    ("Leche de macadamia",          "Vegetal – Leche vegetal",  4.5,  0.0,  1.0,  1.0, 0.01, 0.01, 93.5,
      "Grasa monoinsaturada, sabor suave premium",           "Base vegana premium",    0,  7.0),
-    ("Crema de avena (barista)",    "Base vegetal",  3.0,  0.0,  7.0,  8.0, 0.07, 0.09, 82.0,
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # VEGETAL — CREMA VEGETAL
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Crema de coco 24%",           "Vegetal – Crema vegetal", 24.0,  0.0,  4.0,  1.5, 0.04, 0.05, 70.5,
+     "Más concentrada, baja agua",                          "Grasa vegana alta",      0,  6.5),
+    ("Crema de avena (barista)",    "Vegetal – Crema vegetal",  3.0,  0.0,  7.0,  8.0, 0.07, 0.09, 82.0,
      "Formulada para espumar, más estable que leche avena", "Textura barista vegana", 0,  6.8),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # FRUTA TROPICAL (Venezuela/LatAm)
+    # VEGETAL — FRUTA FRESCA / CONGELADA (tropical Venezuela/LatAm)
     # ══════════════════════════════════════════════════════════════════════════
-    ("Mango (pulpa fresca)",        "Fruta",  0.4,  0.0, 14.8,  0.7, 0.15, 0.21, 84.1,
+    ("Mango (pulpa fresca)",        "Vegetal – Fruta fresca / congelada",  0.4,  0.0, 14.8,  0.7, 0.15, 0.21, 84.1,
      "Brix 14-18°, β-caroteno, pH 3.4-4.8",                "Sorbete tropical",      16,  3.9),
-    ("Maracuyá (pulpa con semilla)","Fruta",  0.7,  0.0, 11.2,  1.5, 0.11, 0.16, 86.6,
+    ("Maracuyá (pulpa con semilla)","Vegetal – Fruta fresca / congelada",  0.7,  0.0, 11.2,  1.5, 0.11, 0.16, 86.6,
      "pH 2.8-3.5, muy ácido, passiflora, antioxidantes",   "Sorbete intenso",       11,  3.0),
-    ("Parchita/Fruta de la pasión", "Fruta",  0.4,  0.0, 11.0,  1.8, 0.11, 0.16, 86.8,
+    ("Parchita/Fruta de la pasión", "Vegetal – Fruta fresca / congelada",  0.4,  0.0, 11.0,  1.8, 0.11, 0.16, 86.8,
      "Igual que maracuyá, nombre local venezolano",         "Acidez + aroma",        13,  3.0),
-    ("Guayaba (pulpa)",             "Fruta",  0.9,  0.0,  9.0,  5.5, 0.09, 0.13, 84.6,
+    ("Guayaba (pulpa)",             "Vegetal – Fruta fresca / congelada",  0.9,  0.0,  9.0,  5.5, 0.09, 0.13, 84.6,
      "Pectina muy alta, pH 3.5-4.0, licopeno",              "Sorbete con cuerpo",    10,  3.7),
-    ("Piña (pulpa fresca)",         "Fruta",  0.1,  0.0, 10.5,  0.5, 0.11, 0.15, 88.9,
+    ("Piña (pulpa fresca)",         "Vegetal – Fruta fresca / congelada",  0.1,  0.0, 10.5,  0.5, 0.11, 0.15, 88.9,
      "Bromelina → inactivar a 70°C, pH 3.2-4.0",           "Sorbete cítrico dulce", 12,  3.5),
-    ("Cambur/Banana (maduro)",      "Fruta",  0.3,  0.0, 22.8,  2.6, 0.23, 0.32, 74.3,
+    ("Cambur/Banana (maduro)",      "Vegetal – Fruta fresca / congelada",  0.3,  0.0, 22.8,  2.6, 0.23, 0.32, 74.3,
      "Almidón resistente madurado en azúcar, POD alto",     "Cuerpo, dulzor natural",25,  4.6),
-    ("Papaya/Lechosa (pulpa)",      "Fruta",  0.3,  0.0,  8.3,  0.9, 0.08, 0.11, 90.5,
+    ("Papaya/Lechosa (pulpa)",      "Vegetal – Fruta fresca / congelada",  0.3,  0.0,  8.3,  0.9, 0.08, 0.11, 90.5,
      "Papaína activa → inactivar con calor, β-caroteno",    "Sorbete suave",          9,  5.8),
-    ("Aguacate (pulpa)",            "Fruta",  15.0, 0.0,  0.7,  3.0, 0.01, 0.01, 81.3,
+    ("Aguacate (pulpa)",            "Vegetal – Fruta fresca / congelada", 15.0,  0.0,  0.7,  3.0, 0.01, 0.01, 81.3,
      "66% MG monoinsaturada, cremosidad única",             "Base vegana untuosa",    0,  6.3),
-    ("Tamarindo (pulpa)",           "Fruta",  0.6,  0.0, 38.0,  5.5, 0.38, 0.55, 55.9,
+    ("Tamarindo (pulpa)",           "Vegetal – Fruta fresca / congelada",  0.6,  0.0, 38.0,  5.5, 0.38, 0.55, 55.9,
      "Muy concentrado, ácido tartárico, azúcar alta",       "Sorbete agridulce",     55,  3.0),
-    ("Lulo (pulpa)",                "Fruta",  0.1,  0.0,  4.5,  0.5, 0.05, 0.07, 94.9,
+    ("Lulo (pulpa)",                "Vegetal – Fruta fresca / congelada",  0.1,  0.0,  4.5,  0.5, 0.05, 0.07, 94.9,
      "pH 2.5-3.0, muy ácido, aroma único andino",           "Sorbete intenso ácido", 5,   2.8),
-    ("Carambola (pulpa)",           "Fruta",  0.3,  0.0,  7.1,  0.4, 0.07, 0.10, 92.2,
+    ("Carambola (pulpa)",           "Vegetal – Fruta fresca / congelada",  0.3,  0.0,  7.1,  0.4, 0.07, 0.10, 92.2,
      "Ácido oxálico, pH 3.0-4.0, apariencia estrella",      "Sorbete tropical raro", 7,   3.5),
-    ("Coco rallado seco",           "Fruta",  64.0, 0.0,  6.5,  9.0, 0.07, 0.07, 20.5,
-     "Grasa saturada laurica, fibra 9%",                    "Textura, sabor coco",   0,   6.5),
-    ("Mango (enlatado en almíbar)", "Fruta",  0.2,  0.0, 23.0,  0.5, 0.23, 0.32, 76.3,
+    ("Mango (enlatado en almíbar)", "Vegetal – Fruta fresca / congelada",  0.2,  0.0, 23.0,  0.5, 0.23, 0.32, 76.3,
      "Almíbar añadido, Brix 18-22°, pasteurizado",          "Sorbete sin temporada", 22,  3.8),
-    ("Piña (enlatada en jugo)",     "Fruta",  0.1,  0.0, 14.0,  0.5, 0.14, 0.19, 85.4,
+    ("Piña (enlatada en jugo)",     "Vegetal – Fruta fresca / congelada",  0.1,  0.0, 14.0,  0.5, 0.14, 0.19, 85.4,
      "Sin almíbar extra, bromelina inactiva por proceso",   "Sorbete conveniente",   14,  3.6),
-
-    # ── Fruta templada/europea ─────────────────────────────────────────────────
-    ("Fresa (pulpa)",               "Fruta",  0.3,  0.0,  7.7,  0.5, 0.08, 0.11, 91.5,
+    ("Fresa (pulpa)",               "Vegetal – Fruta fresca / congelada",  0.3,  0.0,  7.7,  0.5, 0.08, 0.11, 91.5,
      "Antocianos, pH 3.0-3.5, Brix 8-11°",                 "Sorbete clásico",        9,  3.2),
-    ("Frambuesa (pulpa)",           "Fruta",  0.7,  0.0,  5.4,  2.8, 0.05, 0.07, 91.1,
+    ("Frambuesa (pulpa)",           "Vegetal – Fruta fresca / congelada",  0.7,  0.0,  5.4,  2.8, 0.05, 0.07, 91.1,
      "pH 2.8-3.2, muy ácida, pepitas → tamizar",           "Sorbete intenso",        7,  3.0),
-    ("Arándano (blueberry)",        "Fruta",  0.3,  0.0, 10.0,  0.8, 0.10, 0.14, 88.9,
+    ("Arándano (blueberry)",        "Vegetal – Fruta fresca / congelada",  0.3,  0.0, 10.0,  0.8, 0.10, 0.14, 88.9,
      "Antocianos altos, pH 3.1-3.3",                        "Sorbete antioxidante",  11,  3.2),
-    ("Mora (blackberry)",           "Fruta",  0.5,  0.0,  9.6,  2.2, 0.10, 0.13, 87.7,
+    ("Mora (blackberry)",           "Vegetal – Fruta fresca / congelada",  0.5,  0.0,  9.6,  2.2, 0.10, 0.13, 87.7,
      "Antocianos, pepitas → tamizar",                       "Sorbete oscuro",        10,  3.2),
-    ("Limón (jugo fresco)",         "Fruta",  0.3,  0.0,  2.5,  0.3, 0.03, 0.04, 96.9,
+    ("Limón (jugo fresco)",         "Vegetal – Fruta fresca / congelada",  0.3,  0.0,  2.5,  0.3, 0.03, 0.04, 96.9,
      "pH 2.0-2.6, ácido cítrico 5-8%",                     "Acidez, equilibrio",     9,  2.3),
-    ("Naranja (jugo fresco)",       "Fruta",  0.2,  0.0,  9.4,  0.4, 0.09, 0.13, 90.0,
+    ("Naranja (jugo fresco)",       "Vegetal – Fruta fresca / congelada",  0.2,  0.0,  9.4,  0.4, 0.09, 0.13, 90.0,
      "pH 3.5-4.0, hesperidina",                             "Sorbete cítrico",       11,  3.7),
-    ("Durazno/Melocotón (fresco)",  "Fruta",  0.3,  0.0,  9.5,  0.8, 0.10, 0.13, 89.4,
+    ("Durazno/Melocotón (fresco)",  "Vegetal – Fruta fresca / congelada",  0.3,  0.0,  9.5,  0.8, 0.10, 0.13, 89.4,
      "Ácido málico, β-caroteno",                            "Sorbete aromático",     10,  3.7),
-    ("Durazno (enlatado en almíbar)","Fruta", 0.1,  0.0, 18.0,  0.3, 0.18, 0.25, 81.6,
+    ("Durazno (enlatado en almíbar)","Vegetal – Fruta fresca / congelada", 0.1,  0.0, 18.0,  0.3, 0.18, 0.25, 81.6,
      "Almíbar ligero, consistente todo el año",             "Sorbete clásico",       18,  3.9),
-    ("Cereza maraschino (enlatada)","Fruta",  0.3,  0.0, 28.0,  0.3, 0.28, 0.39, 71.4,
+    ("Cereza maraschino (enlatada)","Vegetal – Fruta fresca / congelada",  0.3,  0.0, 28.0,  0.3, 0.28, 0.39, 71.4,
      "Alta azúcar añadida, uso como inclusion o swirl",     "Decoration / inclusion",28,  3.5),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # DULCIFICANTE
+    # VEGETAL — FRUTA SECA
     # ══════════════════════════════════════════════════════════════════════════
-    ("Sacarosa",                    "Dulcificante",  0.0, 0.0,100.0,  0.0, 1.00, 1.00,  0.0,
+    ("Coco rallado seco",           "Vegetal – Fruta seca",  64.0, 0.0,  6.5,  9.0, 0.07, 0.07, 20.5,
+     "Grasa saturada laurica, fibra 9%",                    "Textura, sabor coco",   0,   6.5),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # AZÚCARES
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Sacarosa",                    "Azúcar – Sacarosa",         0.0, 0.0,100.0,  0.0, 1.00, 1.00,  0.0,
      "Referencia absoluta POD=PAC=1.0",                     "Base de dulzor",         0,  7.0),
-    ("Dextrosa monohidrato",        "Dulcificante",  0.0, 0.0, 91.0,  0.0, 0.75, 1.90,  9.0,
+    ("Dextrosa monohidrato",        "Azúcar – Dextrosa / Glucosa",0.0,0.0, 91.0,  0.0, 0.75, 1.90,  9.0,
      "MW=198, PAC=1.9 → crioscópico potente, frescor suave","Bajar congelación",      0,  7.0),
-    ("Fructosa",                    "Dulcificante",  0.0, 0.0, 99.5,  0.0, 1.20, 1.90,  0.5,
+    ("Fructosa",                    "Azúcar – Fructosa",         0.0, 0.0, 99.5,  0.0, 1.20, 1.90,  0.5,
      "POD>sacarosa en frío, ideal sorbetes, IG bajo",       "Dulzor potenciado frío", 0,  7.0),
-    ("Trehalosa",                   "Dulcificante",  0.0, 0.0, 99.5,  0.0, 0.45, 0.70,  0.5,
+    ("Trehalosa",                   "Azúcar – Trehalosa",        0.0, 0.0, 99.5,  0.0, 0.45, 0.70,  0.5,
      "Crioprotector, protege membranas, POD neutro",        "Estabilidad congelado",  0,  7.0),
-    ("Alulosa",                     "Dulcificante",  0.0, 0.0, 99.0,  0.0, 0.70, 1.00,  1.0,
+    ("Alulosa",                     "Azúcar – Alulosa",          0.0, 0.0, 99.0,  0.0, 0.70, 1.00,  1.0,
      "0.4 kcal/g, sabor idéntico a sacarosa, POD=0.70",    "Dulcificante light",     0,  7.0),
-    ("Eritritol",                   "Dulcificante",  0.0, 0.0, 99.5,  0.0, 0.65, 1.30,  0.5,
+    ("Eritritol",                   "Azúcar – Eritritol",        0.0, 0.0, 99.5,  0.0, 0.65, 1.30,  0.5,
      "0.2 kcal/g, PAC alto, máx 1.5% mezcla total",        "Low-calorie, frescor",   0,  7.0),
-    ("Azúcar invertido",            "Dulcificante",  0.0, 0.0, 75.0,  0.0, 1.30, 1.90, 25.0,
+    ("Azúcar invertido",            "Azúcar – Azúcar invertido", 0.0, 0.0, 75.0,  0.0, 1.30, 1.90, 25.0,
      "Fructosa+glucosa libres, higroscópico, antirecristal","Textura suave, brillo",  0,  7.0),
-    ("Glucosa líquida DE40",        "Dulcificante",  0.0, 0.0, 95.0,  0.0, 0.50, 0.64,  5.0,
+    ("Glucosa líquida DE40",        "Azúcar – Glucosa líquida / DE40",0.0,0.0,95.0, 0.0, 0.50, 0.64,  5.0,
      "Sirop DE40, anticristalización, textura extensible",  "Textura, anti-cristal",  0,  7.0),
-    ("Glucosa atomizada DE60",      "Dulcificante",  0.0, 0.0, 95.0,  0.0, 0.70, 0.90,  5.0,
+    ("Glucosa atomizada DE60",      "Azúcar – Glucosa líquida / DE40",0.0,0.0,95.0, 0.0, 0.70, 0.90,  5.0,
      "Mayor dulzor que DE40, polvo soluble",                "Balance dulzor/textura", 0,  7.0),
-    ("Miel de abeja",               "Dulcificante",  0.0, 0.0, 80.0,  1.0, 1.00, 1.50, 19.0,
+    ("Miel de abeja",               "Azúcar – Otro",             0.0, 0.0, 80.0,  1.0, 1.00, 1.50, 19.0,
      "Fructosa+glucosa 70%, polifenoles, aroma floral",     "Dulzor floral complejo", 0,  3.9),
-    ("Isomalt",                     "Dulcificante",  0.0, 0.0, 98.5,  0.0, 0.45, 0.70,  1.5,
+    ("Isomalt",                     "Azúcar – Otro",             0.0, 0.0, 98.5,  0.0, 0.45, 0.70,  1.5,
      "Sin caries, bajo IG, cristales transparentes",        "Reducir azúcar normal",  0,  7.0),
-    ("Xilitol",                     "Dulcificante",  0.0, 0.0, 98.0,  0.0, 1.00, 1.20,  2.0,
+    ("Xilitol",                     "Azúcar – Otro",             0.0, 0.0, 98.0,  0.0, 1.00, 1.20,  2.0,
      "PAC=1.2, frescor, efecto laxante >50g/día",           "Dulcificante dental",    0,  7.0),
-    ("Maltitol",                    "Dulcificante",  0.0, 0.0, 99.0,  0.0, 0.75, 0.90,  1.0,
+    ("Maltitol",                    "Azúcar – Otro",             0.0, 0.0, 99.0,  0.0, 0.75, 0.90,  1.0,
      "Similar a sacarosa, molestias GI en exceso",          "Sugar-free",             0,  7.0),
-    ("Panela rallada",              "Dulcificante",  0.0, 0.0, 92.0,  2.0, 0.92, 1.20,  4.0,
+    ("Panela rallada",              "Azúcar – Otro",             0.0, 0.0, 92.0,  2.0, 0.92, 1.20,  4.0,
      "Sacarosa+minerales, aroma melado venezolano",         "Dulzor tradicional",     0,  5.5),
-    ("Melaza",                      "Dulcificante",  0.0, 0.0, 68.0,  5.0, 0.85, 1.20, 22.0,
+    ("Melaza",                      "Azúcar – Otro",             0.0, 0.0, 68.0,  5.0, 0.85, 1.20, 22.0,
      "Subproducto azúcar, hierro, potasio, amargo residual","Dulzor oscuro",          0,  5.0),
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -261,30 +354,30 @@ DB_DATA = [
      "Mezcla comercial, POD/PAC del eritritol base",         "Corrector sabor light",  0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ESTABILIZANTE
+    # ESTABILIZANTES
     # ══════════════════════════════════════════════════════════════════════════
-    ("Goma Xantana",                "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("Goma Xantana",                "Estabilizante – Goma",          0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "Pseudoplástica, estable pH 2-8, dosis 0.1-0.3g/kg",   "Estabilidad universal",  0,  7.0),
-    ("Goma Guar",                   "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("Goma Guar",                   "Estabilizante – Goma",          0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "Hidrocoloide frío, dosis 0.1-0.2g/kg, sinergia Xantana","Sorbetes, viscosidad", 0,  7.0),
-    ("CMC (carboximetilcelulosa)",  "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
-     "Espesante clásico, dosis 0.8-1.5g/kg, se degrada pH<4","Retención agua",        0,  7.0),
-    ("Pectina LM 99%",              "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
-     "Baja metoxilación, gelifica con Ca²⁺, dosis 1-2g/kg", "Sorbetes, frutas",       0,  7.0),
-    ("Pectina HM",                  "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
-     "Alta metoxilación, gelifica pH<3.5 + azúcar >55%",    "Frutas ácidas altas Brix",0, 7.0),
-    ("LBG (algarroba)",             "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("LBG (algarroba)",             "Estabilizante – Goma",          0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "Galactomanano, requiere >80°C para hidratar, dosis 1-2g/kg","Cuerpo cremoso",   0,  7.0),
-    ("Agar-agar",                   "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("Agar-agar",                   "Estabilizante – Goma",          0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "Polisacárido alga, gel firme reversible, dosis 2-5g/kg","Gel fuerte",           0,  7.0),
-    ("Gelatina sin sabor (200 bloom)","Estabilizante",0.0,0.0, 0.0, 87.0, 0.00, 0.00,  3.0,
+    ("Gelatina sin sabor (200 bloom)","Estabilizante – Goma",        0.0, 0.0, 0.0, 87.0, 0.00, 0.00,  3.0,
      "Colageno hidrolizado, 200 bloom, dosis 3-8g/kg",       "Cuerpo, overrun",        0,  7.0),
-    ("Almidón modificado",          "Estabilizante", 0.0, 0.0, 0.0, 88.0, 0.00, 0.00, 12.0,
-     "Pregelatinizado, no requiere cocción, dosis 10-20g/kg","Textura lisa",           0,  7.0),
-    ("Inulina HP",                  "Estabilizante", 0.0, 0.0, 0.0, 94.0, 0.00, 0.00,  6.0,
-     "Cadena larga, reemplaza grasa, prebiótico, 1.5 kcal/g","Grasa mimética vegana", 0,  7.0),
-    ("Neutro para helado (mezcla)", "Estabilizante", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("Neutro para helado (mezcla)", "Estabilizante – Goma",          0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "LBG+Guar+κ-Carragenina, dosis 3-5g/kg, listo para usar","Estructura completa",  0,  7.0),
+    ("CMC (carboximetilcelulosa)",  "Estabilizante – CMC / Celulosa",0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+     "Espesante clásico, dosis 0.8-1.5g/kg, se degrada pH<4","Retención agua",        0,  7.0),
+    ("Pectina LM 99%",              "Estabilizante – Pectina",       0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+     "Baja metoxilación, gelifica con Ca²⁺, dosis 1-2g/kg", "Sorbetes, frutas",       0,  7.0),
+    ("Pectina HM",                  "Estabilizante – Pectina",       0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+     "Alta metoxilación, gelifica pH<3.5 + azúcar >55%",    "Frutas ácidas altas Brix",0, 7.0),
+    ("Almidón modificado",          "Estabilizante – Almidón modificado",0.0,0.0,0.0,88.0,0.00, 0.00, 12.0,
+     "Pregelatinizado, no requiere cocción, dosis 10-20g/kg","Textura lisa",           0,  7.0),
+    ("Inulina HP",                  "Estabilizante – Otro",          0.0, 0.0, 0.0, 94.0, 0.00, 0.00,  6.0,
+     "Cadena larga, reemplaza grasa, prebiótico, 1.5 kcal/g","Grasa mimética vegana", 0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
     # EMULSIONANTE
@@ -299,82 +392,90 @@ DB_DATA = [
      "Lecitina concentrada, 5x yema fresca",                 "Emulsión concentrada",   0,  6.5),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PROTEÍNA
+    # PROTEÍNAS
     # ══════════════════════════════════════════════════════════════════════════
-    ("WPC 80% (suero concentrado)", "Proteína",      4.0, 82.0, 8.0,  0.0, 0.08, 0.08,  6.0,
+    ("WPC 80% (suero concentrado)", "Proteína – Suero (WPC/WPI)",  4.0, 82.0, 8.0,  0.0, 0.08, 0.08,  6.0,
      "80% proteína, espumante, desnaturaliza 72°C",          "Overrun, cuerpo",        0,  6.5),
-    ("WPI 90% (suero aislado)",     "Proteína",      1.0, 92.0, 2.0,  0.0, 0.02, 0.02,  5.0,
+    ("WPI 90% (suero aislado)",     "Proteína – Suero (WPC/WPI)",  1.0, 92.0, 2.0,  0.0, 0.02, 0.02,  5.0,
      "90% proteína, sin lactosa, máxima pureza",             "Helado proteico",        0,  6.5),
-    ("Caseína micelar (MPC 85)",    "Proteína",      2.0, 87.0, 4.0,  0.0, 0.04, 0.04,  7.0,
+    ("Caseína micelar (MPC 85)",    "Proteína – Caseína / MPC",    2.0, 87.0, 4.0,  0.0, 0.04, 0.04,  7.0,
      "Termoestable hasta 140°C, gelificante lento",          "Cuerpo, textura gelada", 0,  6.8),
-    ("Proteína de guisante (pea)",  "Proteína",      6.0, 82.0, 2.0,  2.0, 0.02, 0.02,  8.0,
+    ("Proteína de guisante (pea)",  "Proteína – Vegetal",          6.0, 82.0, 2.0,  2.0, 0.02, 0.02,  8.0,
      "Vegetal, sin alérgenos comunes, desnaturaliza 90°C",   "Proteína vegana",        0,  7.0),
-    ("Clara de huevo en polvo",     "Proteína",      0.0, 82.0, 8.0,  0.0, 0.08, 0.08, 10.0,
+    ("Clara de huevo en polvo",     "Proteína – Huevo",            0.0, 82.0, 8.0,  0.0, 0.08, 0.08, 10.0,
      "Albumina, espumante excepcional, desnaturaliza 60°C",  "Overrun máximo",         0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # GRASA
+    # VEGETAL — OTRO (aceites)
     # ══════════════════════════════════════════════════════════════════════════
-    ("Aceite de coco virgen",       "Grasa",        99.0, 0.0,  0.0,  0.0, 0.00, 0.00,  1.0,
+    ("Aceite de coco virgen",       "Vegetal – Otro",             99.0, 0.0,  0.0,  0.0, 0.00, 0.00,  1.0,
      "Laurico 50%, solidifica <25°C, aroma coco",            "Grasa vegana cristalina",0, 7.0),
-    ("Aceite neutro (maíz/girasol)","Grasa",        99.5, 0.0,  0.0,  0.0, 0.00, 0.00,  0.5,
+    ("Aceite neutro (maíz/girasol)","Vegetal – Otro",            99.5, 0.0,  0.0,  0.0, 0.00, 0.00,  0.5,
      "Sin aroma, insaturado, no cristaliza",                 "Grasa neutra vegana",    0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # CACAO Y CHOCOLATE
+    # SABORIZANTE — CACAO / CHOCOLATE
     # ══════════════════════════════════════════════════════════════════════════
-    ("Cacao polvo sin azúcar natural","Cacao y chocolate",10.0,0.0, 0.0, 55.0, 0.00, 0.00, 35.0,
+    ("Cacao polvo sin azúcar natural","Saborizante – Cacao / Chocolate",10.0,0.0,0.0,55.0,0.00,0.00,35.0,
      "pH 5.0-6.0, rojizo, sabor vivo y ácido, sin alcalinizar","Sabor cacao intenso",  0,  5.5),
-    ("Cacao polvo alcalinizado",    "Cacao y chocolate",11.0,0.0, 0.0, 58.0, 0.00, 0.00, 31.0,
+    ("Cacao polvo alcalinizado",    "Saborizante – Cacao / Chocolate",11.0,0.0,0.0,58.0,0.00,0.00,31.0,
      "Dutched pH 7.5-8.5, color oscuro, sabor suave",        "Cacao oscuro suave",     0,  8.0),
-    ("Pasta de cacao 100%",         "Cacao y chocolate",54.0,0.0, 0.0, 18.0, 0.00, 0.00, 28.0,
+    ("Pasta de cacao 100%",         "Saborizante – Cacao / Chocolate",54.0,0.0,0.0,18.0,0.00,0.00,28.0,
      "Manteca 54%, theobromina, sin azúcar",                 "Cacao puro profundo",    0,  5.5),
-    ("Manteca de cacao",            "Cacao y chocolate",99.5,0.0, 0.0,  0.0, 0.00, 0.00,  0.5,
+    ("Manteca de cacao",            "Saborizante – Cacao / Chocolate",99.5,0.0,0.0, 0.0,0.00,0.00, 0.5,
      "Grasa pura Forma V, temperado",                        "Ajuste grasa/textura",   0,  7.0),
-    ("Chocolate Savoy 46% cacao",   "Cacao y chocolate",28.0,1.5,41.0, 14.0, 0.41, 0.41, 15.5,
+    ("Chocolate Savoy 46% cacao",   "Saborizante – Cacao / Chocolate",28.0,1.5,41.0,14.0,0.41,0.41,15.5,
      "Cobertura venezolana 46%, equilibrado, Brix ~55°",     "Base chocolate venezolano",0, 5.5),
-    ("Cobertura negra 70% cacao",   "Cacao y chocolate",42.0,0.0,29.0, 16.0, 0.29, 0.29, 13.0,
+    ("Cobertura negra 70% cacao",   "Saborizante – Cacao / Chocolate",42.0,0.0,29.0,16.0,0.29,0.29,13.0,
      "Forma V manteca, temperado, intenso",                  "Gelato premium oscuro",  0,  5.5),
-    ("Cobertura negra 55% cacao",   "Cacao y chocolate",33.0,0.0,38.0, 14.0, 0.38, 0.38, 15.0,
+    ("Cobertura negra 55% cacao",   "Saborizante – Cacao / Chocolate",33.0,0.0,38.0,14.0,0.38,0.38,15.0,
      "Balance dulzor/amargo, versátil",                      "Gelato chocolate medio", 0,  5.5),
-    ("Cobertura blanca",            "Cacao y chocolate",36.0,5.0,48.0,  5.0, 0.48, 0.48,  6.0,
+    ("Cobertura blanca",            "Saborizante – Cacao / Chocolate",36.0,5.0,48.0, 5.0,0.48,0.48, 6.0,
      "Sin sólidos de cacao, solo manteca+leche+azúcar",     "Gelato blanco",          0,  6.0),
-    ("Cobertura de leche 38%",      "Cacao y chocolate",35.0,4.0,46.0,  8.0, 0.46, 0.46,  7.0,
+    ("Cobertura de leche 38%",      "Saborizante – Cacao / Chocolate",35.0,4.0,46.0, 8.0,0.46,0.46, 7.0,
      "Leche en polvo integrada, dulce",                      "Gelato con leche",       0,  5.5),
-    ("Chips de chocolate 50%",      "Cacao y chocolate",30.0,0.0,50.0, 10.0, 0.50, 0.50, 10.0,
+    ("Chips de chocolate 50%",      "Saborizante – Cacao / Chocolate",30.0,0.0,50.0,10.0,0.50,0.50,10.0,
      "Estables al horneado, tamaño mini/estándar",           "Inclusion",              0,  5.5),
-    ("Cacao en polvo Savoy",        "Cacao y chocolate",11.0,0.0, 0.0, 55.0, 0.00, 0.00, 34.0,
+    ("Cacao en polvo Savoy",        "Saborizante – Cacao / Chocolate",11.0,0.0, 0.0,55.0,0.00,0.00,34.0,
      "Cacao venezolano, ligeramente alcalinizado, ph ~6.5",  "Sabor cacao local",      0,  6.5),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # SABORIZANTE
+    # SABORIZANTE — PASTA / BASE
     # ══════════════════════════════════════════════════════════════════════════
-    ("Pasta de pistacho (100%)",    "Saborizante",  45.0, 0.0,  7.5, 20.0, 0.08, 0.08, 27.5,
+    ("Pasta de pistacho (100%)",    "Saborizante – Pasta / Base",  45.0, 0.0,  7.5, 20.0, 0.08, 0.08, 27.5,
      "53% MG insaturada, clorofila natural, sin azúcar",     "Gelato pistacchio",      0,  6.5),
-    ("Pasta de avellana (100%)",    "Saborizante",  61.0, 0.0,  4.0, 14.0, 0.04, 0.04, 21.0,
+    ("Pasta de avellana (100%)",    "Saborizante – Pasta / Base",  61.0, 0.0,  4.0, 14.0, 0.04, 0.04, 21.0,
      "Oleico 75%, aroma tostado intenso",                    "Gelato nocciola",        0,  6.5),
-    ("Pasta de almendra (100%)",    "Saborizante",  51.0, 0.0,  4.5, 17.5, 0.05, 0.05, 27.0,
+    ("Pasta de almendra (100%)",    "Saborizante – Pasta / Base",  51.0, 0.0,  4.5, 17.5, 0.05, 0.05, 27.0,
      "Oleico 70%, amandina, suave",                          "Gelato mandorla",        0,  6.8),
-    ("Mantequilla de maní",         "Saborizante",  50.0, 0.0,  6.0, 20.0, 0.06, 0.06, 24.0,
+    ("Mantequilla de maní",         "Saborizante – Pasta / Base",  50.0, 0.0,  6.0, 20.0, 0.06, 0.06, 24.0,
      "Oleico+linoleico, proteína 25%, sal variable",         "Gelato/sorbete maní",    0,  6.5),
-    ("Crema de pistacho (azucarada)","Saborizante", 32.0, 0.0, 28.0, 18.0, 0.28, 0.28, 22.0,
+    ("Crema de pistacho (azucarada)","Saborizante – Pasta / Base", 32.0, 0.0, 28.0, 18.0, 0.28, 0.28, 22.0,
      "Pasta+azúcar+leche, lista para usar, POD significativo","Gelato pistacchio fácil",0, 6.5),
-    ("Praliné de avellana",         "Saborizante",  40.0, 0.0, 38.0,  8.0, 0.38, 0.38, 14.0,
+    ("Praliné de avellana",         "Saborizante – Pasta / Base",  40.0, 0.0, 38.0,  8.0, 0.38, 0.38, 14.0,
      "Pasta+caramelo, intensidad y color dorado",            "Gelato pralinato",       0,  6.5),
-    ("Extracto de vainilla (puro)", "Saborizante",   0.0, 0.0,  5.0,  5.0, 0.05, 0.05, 60.0,
-     "Vainillina natural, dosis 2-5g/kg, alcohol 35%",       "Aroma clásico",          0,  7.0),
-    ("Pasta de vainilla",           "Saborizante",   0.0, 0.0, 40.0, 15.0, 0.40, 0.40, 45.0,
+    ("Pasta de vainilla",           "Saborizante – Pasta / Base",   0.0, 0.0, 40.0, 15.0, 0.40, 0.40, 45.0,
      "Semillas de vainilla, más estable que extracto",       "Vainilla intensa",       0,  7.0),
-    ("Café espresso (concentrado)", "Saborizante",   0.2, 0.0,  1.5,  4.5, 0.02, 0.02, 93.8,
-     "60ml espresso doble, cafeína, pH 5.0",                 "Gelato café",            0,  5.0),
-    ("Café soluble (polvo)",        "Saborizante",   0.0, 0.0,  0.0, 99.0, 0.00, 0.00,  1.0,
-     "Dosis 10-20g/kg, soluble en frío",                     "Sabor café concentrado", 0,  5.0),
-    ("Matcha en polvo (ceremonial)","Saborizante",   5.0, 0.0,  0.0, 80.0, 0.00, 0.00, 15.0,
+    ("Matcha en polvo (ceremonial)","Saborizante – Pasta / Base",   5.0, 0.0,  0.0, 80.0, 0.00, 0.00, 15.0,
      "L-teanina, clorofila, astringente → limitar dosis",    "Gelato japonés",         0,  7.0),
-    ("Canela en polvo",             "Saborizante",   1.2, 0.0,  1.0, 85.0, 0.00, 0.00, 12.8,
-     "Cinamaldehído, dosis 0.5-2g/kg, nota cálida",          "Aroma especiado",        0,  7.0),
-    ("Dulce de leche",              "Saborizante",   5.0, 0.0, 75.0,  5.0, 0.75, 1.05, 19.5,
+    ("Dulce de leche",              "Saborizante – Pasta / Base",   5.0, 0.0, 75.0,  5.0, 0.75, 1.05, 19.5,
      "Maillard de sacarosa+crema+sal",                       "Swirl caramelo",        70,  5.0),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SABORIZANTE — EXTRACTO / ESENCIA
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Extracto de vainilla (puro)", "Saborizante – Extracto / Esencia",  0.0, 0.0,  5.0,  5.0, 0.05, 0.05, 60.0,
+     "Vainillina natural, dosis 2-5g/kg, alcohol 35%",       "Aroma clásico",          0,  7.0),
+    ("Café espresso (concentrado)", "Saborizante – Extracto / Esencia",  0.2, 0.0,  1.5,  4.5, 0.02, 0.02, 93.8,
+     "60ml espresso doble, cafeína, pH 5.0",                 "Gelato café",            0,  5.0),
+    ("Café soluble (polvo)",        "Saborizante – Extracto / Esencia",  0.0, 0.0,  0.0, 99.0, 0.00, 0.00,  1.0,
+     "Dosis 10-20g/kg, soluble en frío",                     "Sabor café concentrado", 0,  5.0),
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SABORIZANTE — ESPECIAS
+    # ══════════════════════════════════════════════════════════════════════════
+    ("Canela en polvo",             "Saborizante – Especias",  1.2, 0.0,  1.0, 85.0, 0.00, 0.00, 12.8,
+     "Cinamaldehído, dosis 0.5-2g/kg, nota cálida",          "Aroma especiado",        0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
     # ALCOHOL
@@ -389,15 +490,15 @@ DB_DATA = [
      "Café+azúcar+vodka",                                    "Aroma café dulce",       0,  7.0),
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ÁCIDO Y MINERAL
+    # OTRO (ácidos y minerales)
     # ══════════════════════════════════════════════════════════════════════════
-    ("Ácido cítrico en polvo",      "Ácido y mineral",0.0, 0.0, 0.0, 99.5, 0.00, 0.00,  0.5,
+    ("Ácido cítrico en polvo",      "Otro", 0.0, 0.0, 0.0, 99.5, 0.00, 0.00,  0.5,
      "Acidulante, activa pectina HM, dosis 1-3g/kg",         "Ajuste pH, equilibrio",  0,  2.0),
-    ("Ácido málico",                "Ácido y mineral",0.0, 0.0, 0.0, 99.5, 0.00, 0.00,  0.5,
+    ("Ácido málico",                "Otro", 0.0, 0.0, 0.0, 99.5, 0.00, 0.00,  0.5,
      "Más suave que cítrico, sabor manzana, pH bajo",        "Acidez fina frutal",     0,  2.0),
-    ("Sal marina fina",             "Ácido y mineral",0.0, 0.0, 0.0, 99.5, 0.00, 2.20,  0.5,
+    ("Sal marina fina",             "Otro", 0.0, 0.0, 0.0, 99.5, 0.00, 2.20,  0.5,
      "NaCl PAC=2.2!, potenciador sabor, dosis 1-2g/kg",      "Contraste dulce, PAC",   0,  7.0),
-    ("Bicarbonato de sodio",        "Ácido y mineral",0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
+    ("Bicarbonato de sodio",        "Otro", 0.0, 0.0, 0.0, 99.0, 0.00, 0.00,  1.0,
      "Neutralizador de acidez, dosis <1g/kg",                "Ajuste pH base",         0, 11.0),
 ]
 
@@ -417,10 +518,13 @@ def init_db():
         row[0]
         for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
     }
-    for version, sql, description in MIGRATIONS:
+    for version, sql_or_fn, description in MIGRATIONS:
         if version not in applied:
             try:
-                conn.execute(sql)
+                if callable(sql_or_fn):
+                    sql_or_fn(conn)
+                else:
+                    conn.execute(sql_or_fn)
                 conn.execute(
                     "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
                     (version, description)

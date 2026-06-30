@@ -216,14 +216,17 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
         st.caption("Selecciona ingredientes y gramos para ver el análisis en vivo.")
         return
 
-    totals  = calc.calc_totals(lines_for_calculator)
-    pct     = calc.calc_percentages(totals)
-    derived = calc.calc_derived(
+    totals        = calc.calc_totals(lines_for_calculator)
+    pct           = calc.calc_percentages(totals)
+    alcohol_lines = calc._detect_alcohol_lines(lines_for_calculator)
+    derived       = calc.calc_derived(
         totals, pct, product_type=product_type, machine=machine,
         lines_with_ings=lines_for_calculator,
         config=config_override or None,
+        alcohol_lines=alcohol_lines,
     )
-    kcal = calc.calc_calories(totals, lines_for_calculator)
+    kcal      = calc.calc_calories(totals, lines_for_calculator, alcohol_lines=alcohol_lines)
+    prot_data = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
     tg   = derived.get('targets', targets_default)
     or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
 
@@ -501,7 +504,6 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
         st.markdown(_sw_html, unsafe_allow_html=True)
 
     # ── PROTEÍNAS ─────────────────────────────────────────────────────────────
-    prot_data = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
     if prot_data and prot_data.get('fuentes'):
         _section("💪 Proteínas")
         _prot_html = '<div class="gelato-card">'
@@ -534,9 +536,7 @@ def _render_panel(lines_for_calculator, active_ingredient_names,
             pct=pct,
             derived=derived,
             kcal=kcal,
-            protein_data=calc.analyze_protein(
-                lines_for_calculator, totals, pct, product_type
-            ),
+            protein_data=prot_data,
         ).encode("utf-8"),
         file_name="ticket_produccion.txt",
         mime="text/plain",

@@ -12,8 +12,6 @@ Funciones públicas:
     _detect_alcohol_lines(lines)      → detección de etanol (uso interno)
 """
 
-import math
-
 from constants import (
     MACHINE_CREAMI_DELUXE, MACHINE_CREAMI_STANDARD,
     PRODUCT_SORBETE, PRODUCT_GRANITA, PRODUCT_VEGANO, PRODUCT_LIGERO,
@@ -22,6 +20,9 @@ from constants import (
     CALORIE_CLASSIFICATION, PROTEIN_CLASSIFICATION,
     CREAMI_OVERRUN_PCT,
 )
+
+# Fix 3: sorted una sola vez al cargar el módulo (era cada llamada a analyze_protein)
+_PROTEIN_PROFILE_KEYS = sorted(PROTEIN_PROFILES.keys(), key=len, reverse=True)
 
 # ── Capacidades físicas ───────────────────────────────────────────────────────
 CREAMI_DELUXE_CAPACITY_G   = 640
@@ -91,7 +92,8 @@ def _detect_alcohol_lines(lines_with_ings: list) -> list:
 # CALORÍAS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calc_calories(totals: dict, lines_with_ings: list = None) -> dict:
+def calc_calories(totals: dict, lines_with_ings: list = None,
+                  alcohol_lines: list = None) -> dict:
     """
     Estima calorías totales y por 100g usando factores de Atwater.
 
@@ -120,7 +122,8 @@ def calc_calories(totals: dict, lines_with_ings: list = None) -> dict:
             if ing and grams and ing.get('zero_calorie', 0):
                 g = float(grams)
                 kcal -= g * float(ing.get('sugars', 0)) / 100 * _KCAL_SUGAR
-        for a in _detect_alcohol_lines(lines_with_ings):
+        alc = alcohol_lines if alcohol_lines is not None else _detect_alcohol_lines(lines_with_ings)
+        for a in alc:
             kcal += a['ethanol_g'] * _KCAL_ALCOHOL
 
     kcal          = max(0, kcal)
@@ -287,7 +290,7 @@ def analyze_protein(lines_with_ings: list, totals: dict, pct: dict,
 
 
 def _match_protein_profile(name_low: str):
-    for key in sorted(PROTEIN_PROFILES.keys(), key=len, reverse=True):
+    for key in _PROTEIN_PROFILE_KEYS:
         if key in name_low:
             return PROTEIN_PROFILES[key], key
     return None, ''
@@ -381,10 +384,9 @@ def _overrun_creami(base_grams: float, machine: str) -> dict:
 def _overrun_mantecadora(base_grams: float, overrun_pct: float,
                           target_liters: float) -> dict:
     or_pct      = overrun_pct / 100
-    or_factor   = or_pct
     base_needed = target_liters * 1000 / (1 + or_pct) if (1 + or_pct) else 0
     liters_prod = base_grams / 1000 * (1 + or_pct)
-    densidad    = 1.0 / (1 + or_factor) if or_factor else 1.0
+    densidad    = 1.0 / (1 + or_pct) if or_pct else 1.0
     mix_beaker  = base_grams / 2 / (1 + or_pct) if (1 + or_pct) else 0
 
     return {
@@ -397,7 +399,6 @@ def _overrun_mantecadora(base_grams: float, overrun_pct: float,
         'final_grams_per_liter': round(base_grams / liters_prod, 0) if liters_prod else 0,
         'densidad_helado_g_ml':  round(densidad,     3),
         'mix_per_beaker':        round(mix_beaker,   1),
-        'pacojet_beakers':       math.ceil(liters_prod / 0.5) if liters_prod else 0,
         # no aplica a mantecadora
         'potes_completos':  0, 'masa_ultimo_pote_g': 0,
         'masa_por_pote_g':  0, 'potes_base':         0,
