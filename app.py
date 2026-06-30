@@ -133,7 +133,7 @@ st.markdown("""
   <span style="font-size:2rem;">🍦</span>
   <div>
     <div style="font-size:1.5rem;font-weight:800;color:#fff;line-height:1.1">Cepillao' Gelato Studio</div>
-    <div style="font-size:0.78rem;color:#666;">Ninja Creami Edition · Formulador artesanal de helados</div>
+    <div style="font-size:0.78rem;color:#666;">Motor científico · helados, gelato &amp; sorbetes</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -247,9 +247,15 @@ def _radar_chart(pct: dict, tg: dict):
             bgcolor='rgba(30,30,46,0.6)',
         ),
         paper_bgcolor='rgba(0,0,0,0)',
-        showlegend=False,
-        margin=dict(l=55, r=55, t=15, b=15),
-        height=255,
+        showlegend=True,
+        legend=dict(
+            orientation='h', yanchor='bottom', y=-0.22,
+            xanchor='center', x=0.5,
+            font=dict(size=10, color='#aaa'),
+            bgcolor='rgba(0,0,0,0)',
+        ),
+        margin=dict(l=55, r=55, t=15, b=55),
+        height=290,
     )
     return fig
 
@@ -414,10 +420,10 @@ with tab_form:
     # ── Columna ingredientes ──────────────────────────────────────────────────
     with col_ing:
         st.markdown('<div class="section-overline">🧾 Ingredientes</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="ing-row-header">
-          <span>Ingrediente</span><span>Gramos</span><span>$/kg</span>
-        </div>""", unsafe_allow_html=True)
+        _h1, _h2, _h3 = st.columns([3, 1.5, 1.5])
+        _h1.caption("Ingrediente")
+        _h2.caption("Gramos")
+        _h3.caption("$/kg")
 
         lines_for_calculator    = []
         active_ingredient_names = []
@@ -500,6 +506,7 @@ with tab_form:
             )
             kcal = calc.calc_calories(totals, lines_for_calculator)
             tg   = derived.get('targets', targets_default)
+            or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
 
             # ── Barra de llenado del pote ─────────────────────────────────────
             if is_creami:
@@ -543,7 +550,13 @@ with tab_form:
                 bc, _ = badge_colors.get(cal_class['key'], ("badge-info", "#60a5fa"))
                 kcal_badge = f'<span class="badge {bc}">{cal_class["emoji"]} {cal_class["etiqueta"]}</span>'
 
-            pote_kcal = kcal.get('kcal_per_pote_deluxe', 0) if is_creami else 0
+            if is_creami:
+                _tercera_val = kcal.get('kcal_per_pote_deluxe', 0)
+                _tercera_lbl = "kcal / pote completo"
+            else:
+                _or_factor   = overrun_pct / 100
+                _tercera_val = kcal['kcal_per_100g'] / 100 * (1000 / (1 + _or_factor))
+                _tercera_lbl = f"kcal / L (~{overrun_pct:.0f}% OR)"
             st.markdown(f"""
             <div class="kcal-grid">
               <div class="kcal-cell">
@@ -555,8 +568,8 @@ with tab_form:
                 <div class="kcal-cell-label">kcal / porción 120g</div>
               </div>
               <div class="kcal-cell">
-                <div class="kcal-cell-val">{pote_kcal:.0f}</div>
-                <div class="kcal-cell-label">kcal / pote completo</div>
+                <div class="kcal-cell-val">{_tercera_val:.0f}</div>
+                <div class="kcal-cell-label">{_tercera_lbl}</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
@@ -575,17 +588,10 @@ with tab_form:
                 _param_bar("Grasa", pct.get('fat_pct', 0),
                            tg['fat'][0], tg['fat'][1], "%", scale_max=25)
             with c3:
-                water_v = pct.get('water_pct', 0)
-                st.markdown(f"""
-                <div class="param-bar-wrap">
-                  <div class="param-bar-header">
-                    <span class="param-label">Agua libre</span>
-                    <span class="param-value">{water_v:.1f}%</span>
-                  </div>
-                  <div class="param-bar-bg">
-                    <div class="param-bar-fill bar-ok" style="width:{min(water_v,100):.1f}%;"></div>
-                  </div>
-                </div>""", unsafe_allow_html=True)
+                water_v  = pct.get('water_pct', 0)
+                water_lo = max(0, round(100 - tg['st'][1], 1))
+                water_hi = round(100 - tg['st'][0], 1)
+                _param_bar("Agua libre", water_v, water_lo, water_hi, "%", scale_max=100)
 
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -608,9 +614,9 @@ with tab_form:
                            tg['pac'][0], tg['pac'][1], "", scale_max=400)
 
             # ── RADAR DE COMPOSICIÓN ──────────────────────────────────────────
-            _section("🕸️ Radar de Composición")
-            st.plotly_chart(_radar_chart(pct, tg), use_container_width=True,
-                            config={'displayModeBar': False})
+            with st.expander("🕸️ Radar de Composición", expanded=False):
+                st.plotly_chart(_radar_chart(pct, tg), use_container_width=True,
+                                config={'displayModeBar': False})
 
             # ── CRIOSCOPÍA + Aw ───────────────────────────────────────────────
             _section("❄️ Crioscopía  ·  💧 Actividad de Agua")
@@ -659,22 +665,23 @@ with tab_form:
                     st.markdown('<div class="badge badge-ok">✓ Formulación dentro de rangos</div>',
                                 unsafe_allow_html=True)
                 else:
+                    _diag_html = ""
                     for d in crits:
-                        with st.expander(f"🔴 {d['title']}"):
-                            st.markdown(f"<div style='color:#f87171;font-size:0.82rem;'>{d['tip']}</div>",
-                                        unsafe_allow_html=True)
+                        _diag_html += (f'<div class="diag-item diag-critical">'
+                                       f'<div class="diag-title">🔴 {d["title"]}</div>'
+                                       f'<div class="diag-tip">{d["tip"]}</div></div>')
                     for d in imps:
-                        with st.expander(f"🟠 {d['title']}"):
-                            st.markdown(f"<div style='color:#fb923c;font-size:0.82rem;'>{d['tip']}</div>",
-                                        unsafe_allow_html=True)
+                        _diag_html += (f'<div class="diag-item diag-important">'
+                                       f'<div class="diag-title">🟠 {d["title"]}</div>'
+                                       f'<div class="diag-tip">{d["tip"]}</div></div>')
                     for d in adjs:
-                        with st.expander(f"🔵 {d['title']}"):
-                            st.markdown(f"<div style='color:#93c5fd;font-size:0.82rem;'>{d['tip']}</div>",
-                                        unsafe_allow_html=True)
+                        _diag_html += (f'<div class="diag-item diag-adjustable">'
+                                       f'<div class="diag-title">🔵 {d["title"]}</div>'
+                                       f'<div class="diag-tip">{d["tip"]}</div></div>')
+                    st.markdown(_diag_html, unsafe_allow_html=True)
 
             # ── OVERRUN ───────────────────────────────────────────────────────
             _section("📐 Rendimiento / Overrun")
-            or_d = calc.overrun_calc(totals["grams"], overrun_pct, target_liters, machine)
             if or_d.get('is_creami'):
                 c1, c2, c3 = st.columns(3)
                 c1.markdown(f"""<div class="comp-cell">
@@ -759,38 +766,41 @@ with tab_form:
             sw_data = calc.analyze_sweeteners(lines_for_calculator)
             if sw_data:
                 _section("🍬 Edulcorantes")
+                _sw_html = '<div class="gelato-card">'
                 for sw in sw_data:
                     if sw.get('warning'):
-                        st.markdown(
-                            f"<div style='font-size:0.8rem;color:#fb923c;'>{sw['warning']}</div>",
-                            unsafe_allow_html=True
-                        )
-                    st.markdown(
-                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:2px;'>"
+                        _sw_html += (f"<div style='font-size:0.79rem;color:#fb923c;"
+                                     f"margin-bottom:4px;'>{sw['warning']}</div>")
+                    _sw_html += (
+                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:6px;"
+                        f"padding-bottom:6px;border-bottom:1px solid #2d2d44;'>"
                         f"<b style='color:#fff;'>{sw['nombre']}</b> · "
                         f"POD {sw['pod_contrib']:.0f} ({sw['pct_pod']:.0f}%) · "
                         f"PAC {sw['pac_contrib']:.0f} ({sw['pct_pac']:.0f}%) · "
-                        f"{sw['efecto_sabor']}</div>",
-                        unsafe_allow_html=True
+                        f"{sw['efecto_sabor']}</div>"
                     )
+                _sw_html += '</div>'
+                st.markdown(_sw_html, unsafe_allow_html=True)
 
             # ── PROTEÍNAS ─────────────────────────────────────────────────────
             prot_data = calc.analyze_protein(lines_for_calculator, totals, pct, product_type)
             if prot_data and prot_data.get('fuentes'):
                 _section("💪 Proteínas")
+                _prot_html = '<div class="gelato-card">'
                 for f in prot_data['fuentes']:
-                    st.markdown(
-                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:2px;'>"
+                    _prot_html += (
+                        f"<div style='font-size:0.78rem;color:#aaa;margin-bottom:6px;"
+                        f"padding-bottom:6px;border-bottom:1px solid #2d2d44;'>"
                         f"<b style='color:#fff;'>{f['nombre']}</b> · "
-                        f"{f.get('proteina_g', 0):.1f} g proteína</div>",
-                        unsafe_allow_html=True
+                        f"{f.get('proteina_g', 0):.1f} g proteína · "
+                        f"<span style='color:#555;'>{f.get('tipo','')}</span></div>"
                     )
                 if prot_data.get('recomendaciones'):
                     for s in prot_data['recomendaciones']:
-                        st.markdown(
-                            f"<div style='font-size:0.78rem;color:#60a5fa;'>{s['texto']}</div>",
-                            unsafe_allow_html=True
-                        )
+                        _prot_html += (f"<div style='font-size:0.78rem;color:#60a5fa;"
+                                       f"padding-top:4px;'>{s['texto']}</div>")
+                _prot_html += '</div>'
+                st.markdown(_prot_html, unsafe_allow_html=True)
 
             # ── EXPORTAR ──────────────────────────────────────────────────────
             st.divider()
@@ -820,7 +830,7 @@ with tab_form:
 # TAB 2 — MIS RECETAS
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_recetas:
-    st.subheader("📁 Mis Recetas Guardadas")
+    st.markdown('<div style="font-size:1.2rem;font-weight:700;color:#fff;margin-bottom:4px;">📁 Mis Recetas</div>', unsafe_allow_html=True)
     try:
         all_recipes = db.get_all_recipes(recipes_only=True)
     except Exception as e:
@@ -837,10 +847,15 @@ with tab_recetas:
             with st.expander(f"**{rec['name']}** — {rec['product_type']} · {rec['machine']}"):
                 col_info, col_actions = st.columns([3, 1])
                 with col_info:
-                    st.caption(f"Guardada: {rec.get('updated_at', '')[:16]}")
-                    st.write(f"**Base:** {rec.get('base_grams', 0):.0f} g")
-                    if rec.get("notes"):
-                        st.write(f"**Notas:** {rec['notes']}")
+                    st.markdown(
+                        f"<div style='font-size:0.75rem;color:#555;'>Guardada: {rec.get('updated_at','')[:16]}</div>"
+                        f"<div style='font-size:0.88rem;color:#ccc;margin-top:3px;'>"
+                        f"Base: <b style='color:#fff;'>{rec.get('base_grams',0):.0f} g</b>"
+                        f" &nbsp;·&nbsp; {rec['product_type']} · {rec['machine']}</div>"
+                        + (f"<div style='font-size:0.78rem;color:#666;margin-top:2px;'>{rec['notes']}</div>"
+                           if rec.get('notes') else ""),
+                        unsafe_allow_html=True
+                    )
                 with col_actions:
                     # REC 3: carga simplificada — elimina 12 líneas de código duplicado
                     if st.button("📂 Cargar", key=f"load_{rec['id']}", use_container_width=True):
@@ -861,7 +876,7 @@ with tab_recetas:
 # TAB 3 — BASES DE HELADO
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_bases:
-    st.subheader("🧫 Bases de Helado")
+    st.markdown('<div style="font-size:1.2rem;font-weight:700;color:#fff;margin-bottom:4px;">🧫 Bases de Helado</div>', unsafe_allow_html=True)
     st.caption("Formulaciones reutilizables que aparecen como ingredientes en el formulador (prefijo 🧪).")
 
     try:
@@ -921,7 +936,7 @@ with tab_bases:
 # TAB 4 — GESTIÓN DE INGREDIENTES
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_ingredientes:
-    st.subheader("🗄️ Base de Datos de Ingredientes")
+    st.markdown('<div style="font-size:1.2rem;font-weight:700;color:#fff;margin-bottom:4px;">🗄️ Ingredientes</div>', unsafe_allow_html=True)
     sub_ver, sub_nuevo = st.tabs(["📋 Ver / Editar", "➕ Nuevo ingrediente"])
 
     with sub_ver:
@@ -944,14 +959,23 @@ with tab_ingredientes:
             with st.expander(f"**{ing['name']}** — _{ing['category']}_"):
                 col_datos, col_edit = st.columns([2, 1])
                 with col_datos:
-                    st.write(f"Grasa: **{ing['fat']}%** | MSNF: **{ing['msnf']}%** | "
-                             f"Azúcares: **{ing['sugars']}%** | Agua: **{ing['water']}%**")
-                    st.write(f"POD: **{ing['pod']}** | PAC: **{ing['pac']}** | "
-                             f"Otros ST: **{ing['other_st']}%**")
-                    if ing.get("price_per_kg", 0):
-                        st.write(f"Precio: **${ing['price_per_kg']:.2f}/kg**")
-                    if ing.get("notes"):
-                        st.caption(ing["notes"])
+                    st.markdown(
+                        f"<div style='font-size:0.82rem;color:#aaa;'>"
+                        f"Grasa <b style='color:#fff;'>{ing['fat']}%</b> &nbsp;·&nbsp; "
+                        f"MSNF <b style='color:#fff;'>{ing['msnf']}%</b> &nbsp;·&nbsp; "
+                        f"Azúcares <b style='color:#fff;'>{ing['sugars']}%</b> &nbsp;·&nbsp; "
+                        f"Agua <b style='color:#fff;'>{ing['water']}%</b></div>"
+                        f"<div style='font-size:0.82rem;color:#aaa;margin-top:3px;'>"
+                        f"POD <b style='color:#fff;'>{ing['pod']}</b> &nbsp;·&nbsp; "
+                        f"PAC <b style='color:#fff;'>{ing['pac']}</b> &nbsp;·&nbsp; "
+                        f"Otros ST <b style='color:#fff;'>{ing['other_st']}%</b>"
+                        + (f" &nbsp;·&nbsp; <b style='color:#4ade80;'>${ing['price_per_kg']:.2f}/kg</b>"
+                           if ing.get('price_per_kg', 0) else "")
+                        + "</div>"
+                        + (f"<div style='font-size:0.75rem;color:#555;margin-top:2px;'>{ing['notes']}</div>"
+                           if ing.get('notes') else ""),
+                        unsafe_allow_html=True
+                    )
                 with col_edit:
                     edit_key = f"edit_open_{ing['id']}"
                     if st.button("✏️ Editar", key=f"btn_edit_{ing['id']}", use_container_width=True):
@@ -992,7 +1016,7 @@ with tab_ingredientes:
                             st.rerun()
 
     with sub_nuevo:
-        st.write("### Agregar ingrediente nuevo")
+        st.markdown('<div style="font-size:1rem;font-weight:700;color:#fff;margin-bottom:8px;">➕ Agregar ingrediente nuevo</div>', unsafe_allow_html=True)
         with st.form("form_nuevo_ing"):
             n_name = st.text_input("Nombre *", placeholder="Ej: Leche de almendra sin azúcar")
             n_cat  = st.selectbox("Categoría *", INGREDIENT_CATEGORIES)
@@ -1033,7 +1057,7 @@ with tab_ingredientes:
 # TAB 5 — CONFIGURACIÓN
 # ═════════════════════════════════════════════════════════════════════════════
 with tab_config:
-    st.subheader("⚙️ Configuración de Parámetros")
+    st.markdown('<div style="font-size:1.2rem;font-weight:700;color:#fff;margin-bottom:4px;">⚙️ Configuración de Parámetros</div>', unsafe_allow_html=True)
     st.markdown("Ajusta los **rangos objetivo** por tipo de producto y máquina. "
                 "Útil para calibrar según tus catas. Los cambios se aplican inmediatamente "
                 "**y se guardan en la base de datos** (persisten entre sesiones).")
@@ -1056,7 +1080,12 @@ with tab_config:
         )
         st.markdown("")
 
-    st.write(f"#### Rangos para: **{cfg_product}** · **{cfg_machine}**")
+    st.markdown(
+        f'<div style="font-size:0.92rem;font-weight:600;color:#fff;margin:8px 0;">'
+        f'Rangos para <span style="color:#60a5fa;">{cfg_product}</span>'
+        f' · <span style="color:#60a5fa;">{cfg_machine}</span></div>',
+        unsafe_allow_html=True
+    )
 
     with st.form("form_config"):
         c1, c2 = st.columns(2)
