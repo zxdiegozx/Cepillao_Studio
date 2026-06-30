@@ -769,8 +769,13 @@ def get_user_config() -> dict:
         return {}
 
 
-def set_user_config(key: str, value: dict) -> None:
-    """Guarda o actualiza un rango personalizado (UPSERT)."""
+def set_user_config(key: str, value: dict) -> bool:
+    """
+    UPSERT de un rango personalizado. Retorna True SOLO si el write se
+    confirmó releyéndolo de disco (read-back). No traga la excepción en
+    silencio: si la UI no sabe que falló, muestra un badge verde mentiroso
+    y el dato se pierde al refrescar (este era el bug original).
+    """
     try:
         conn = get_connection()
         conn.execute(
@@ -782,20 +787,45 @@ def set_user_config(key: str, value: dict) -> None:
             (key, _json.dumps(value))
         )
         conn.commit()
+        # Read-back: confirmamos que la fila quedó escrita y es releíble.
+        # json.loads en ambos lados normaliza tuplas→listas, así la
+        # comparación no falla por el round-trip de tipos.
+        row = conn.execute(
+            "SELECT value FROM user_config WHERE key=?", (key,)
+        ).fetchone()
         conn.close()
-    except Exception:
-        pass
+        return row is not None and _json.loads(row["value"]) == _json.loads(_json.dumps(value))
+    except Exception as e:
+        print(f"[set_user_config] FALLO al persistir '{key}': {e}")
+        return False
 
 
-def delete_user_config(key: str) -> None:
-    """Elimina la config personalizada de una combinación tipo/máquina."""
+def delete_user_config(key: str) -> bool:
+    """Elimina la config de una combinación tipo/máquina. True si no hubo error."""
     try:
         conn = get_connection()
         conn.execute("DELETE FROM user_config WHERE key=?", (key,))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+        return True
+    except Exception as e:
+        print(f"[delete_user_config] FALLO al borrar '{key}': {e}")
+        return False
+
+
+def db_health() -> dict:
+    """
+    Diagnóstico de persistencia: ruta real de la DB y si el volumen está
+    montado. Sirve para distinguir 'bug de código' de 'volumen Railway mal
+    configurado' cuando un guardado falla.
+    """
+    db_dir = os.path.dirname(DB_PATH) or "."
+    return {
+        "db_path":        DB_PATH,
+        "volume_mounted": bool(_vol),
+        "volume_path":    _vol or "(ninguno — filesystem EFÍMERO del contenedor)",
+        "writable":       os.access(db_dir, os.W_OK),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
