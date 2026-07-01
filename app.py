@@ -10,7 +10,7 @@ from ui import (
 )
 
 st.set_page_config(
-    page_title="Cepillao' Gelato Studio",
+    page_title="Cepillao' Studio",
     layout="wide",
     page_icon="🍦"
 )
@@ -62,7 +62,7 @@ st.markdown("""
 <div class="app-header">
   <span class="app-header-logo">🍦</span>
   <div>
-    <div class="app-header-title">Cepillao' Gelato Studio</div>
+    <div class="app-header-title">Cepillao' Studio</div>
     <div class="app-header-sub">Motor científico · helados, gelato &amp; sorbetes</div>
   </div>
 </div>
