@@ -170,3 +170,80 @@
 
 div[data-testid="stMetricValue"] { font-size: 18px !important; font-weight: 700 !important; }
 div[data-testid="stSidebar"] { background: #111120; }
+
+/* ── Mobile (≤ 768px) ─────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+    /* Más espacio aprovechable */
+    .main .block-container {
+        padding-top: 0.75rem !important;
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+
+    /* Grids de 3 col → 2 col */
+    .comp-grid  { grid-template-columns: repeat(2, 1fr) !important; gap: 6px; }
+    .kcal-grid  { grid-template-columns: repeat(2, 1fr) !important; gap: 6px; }
+
+    /* Celdas más compactas */
+    .comp-cell  { padding: 8px 10px; }
+    .kcal-cell  { padding: 8px 10px; }
+    .comp-cell-val  { font-size: 1rem; }
+    .kcal-cell-val  { font-size: 1rem; }
+
+    /* Barras de parámetro: más compactas */
+    .pbar-wrap  { padding: 10px 12px; margin-bottom: 6px; }
+    .pbar-value { font-size: 0.95rem; }
+
+    /* Diagnósticos */
+    .diag-item  { padding: 8px 10px; }
+    .diag-title { font-size: 0.8rem; }
+    .diag-tip   { font-size: 0.74rem; }
+
+    /* Tarjeta genérica */
+    .gelato-card { padding: 12px 14px; }
+
+    /* Botones más grandes para touch */
+    [data-testid="stButton"] > button {
+        min-height: 44px !important;
+        font-size: 0.9rem !important;
+    }
+
+    /* Number inputs más altos para touch */
+    [data-testid="stNumberInput"] input {
+        min-height: 40px !important;
+        font-size: 1rem !important;
+    }
+
+    /* Selectbox más alto */
+    [data-testid="stSelectbox"] > div > div {
+        min-height: 40px !important;
+    }
+
+    /* Sección overline más legible */
+    .section-overline { font-size: 0.65rem; margin-top: 10px; }
+
+    /* Pote fill más compacto */
+    .pote-fill-wrap { padding: 8px 12px; }
+
+    /* Download button más grande */
+    [data-testid="stDownloadButton"] > button {
+        min-height: 48px !important;
+    }
+
+    /* Ocultar cabecera "Ingrediente / Gramos / $/kg": confunde apilada */
+    .ing-col-header { display: none !important; }
+
+    /* Separador visual entre filas de ingrediente */
+    .ing-row-wrap {
+        border-bottom: 1px solid #1e1e32;
+        padding-bottom: 6px;
+        margin-bottom: 6px;
+    }
+    .ing-row-wrap:last-of-type { border-bottom: none; }
+
+    /* Gap mínimo entre columnas apiladas */
+    [data-testid="stHorizontalBlock"] {
+        gap: 4px !important;
+    }
+}
