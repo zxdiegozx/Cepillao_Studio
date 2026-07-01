@@ -24,12 +24,14 @@ Diseñado para heladerías artesanales y desarrollo de recetas que necesitan res
 | **Formulador** | Composición en tiempo real: ST, grasa, MSNF, azúcares, POD, PAC, crioscopía (Raoult), Aw (Ross 1975) |
 | **Radar de parámetros** | Visualización inmediata del balance de la mezcla |
 | **Diagnósticos** | Alertas automáticas con recomendaciones por tipo de producto y máquina |
+| **Restricciones** | 13 reglas declarativas: incompatibilidades de estabilizantes, cotas de edulcorantes, contradicciones de tipo de producto y requisitos de proceso |
 | **Estabilizantes** | Sugerencias de dosificación basadas en la composición calculada |
 | **Ticket de producción** | Resumen imprimible con instrucciones paso a paso |
 | **Escalado** | Multiplicador de receta de ×0.25 a ×20 |
 | **Costos** | Precio por pote y por litro calculados automáticamente |
-| **Ninja Creami** | Soporte nativo con overrun mecánico fijo y cálculo de potes |
+| **Ninja Creami** | Soporte nativo con overrun empírico real (~10%) y cálculo de potes |
 | **Base de datos** | ~130 ingredientes precargados, recetas guardadas en SQLite local |
+| **Interfaz responsive** | Optimizada para móvil: filas de ingredientes horizontales, grids adaptativos, touch targets 44px+ |
 
 ---
 
@@ -76,7 +78,8 @@ Cepillao_Studio/
 ├── app.py                      # Bootstrap: setup, CSS, tabs, llamada a ui/
 ├── calculator.py               # Facade pública del motor
 ├── constants.py                # Constantes y configuración global
-├── database.py                 # ORM SQLite + seed de ~130 ingredientes
+├── database.py                 # ORM SQLite + seed de ~130 ingredientes + db_health()
+├── restricciones.py            # Capa de restricciones: 13 reglas declarativas de formulación
 │
 ├── engine/                     # Motor de cálculo (puro Python, sin Streamlit)
 │   ├── __init__.py             # API pública re-exportada
@@ -95,11 +98,13 @@ Cepillao_Studio/
 │   ├── tab_ingredientes.py     # Tab 4 — Gestión de ingredientes
 │   └── tab_config.py           # Tab 5 — Configuración de rangos
 │
-├── test_calculator.py          # Suite de tests unitarios
+├── tests/
+│   └── test_formulador_state.py  # 36 tests de session_state del formulador
+├── test_calculator.py            # Suite de tests unitarios del motor
 │
 ├── .streamlit/
-│   ├── config.toml             # Configuración Streamlit (headless, CORS)
-│   └── custom.css              # Estilos dark mode de la interfaz
+│   ├── config.toml             # Configuración Streamlit (headless, CORS, WebSocket)
+│   └── custom.css              # Estilos dark mode + responsive móvil
 │
 ├── requirements.txt
 ├── Procfile                    # Comando de inicio para Railway
@@ -124,10 +129,16 @@ Documentación completa de fórmulas y referencias en [CALCULATOR_SCIENCE.md](CA
 ## Tests
 
 ```bash
+# Motor de cálculo
 python -m pytest test_calculator.py -v
+
+# Session state del formulador (36 tests)
+python -m pytest tests/test_formulador_state.py -v
 ```
 
-La suite cubre: cálculo lineal, totales, porcentajes, diagnósticos, crioscopía, actividad de agua, nutrición, overrun y detección de alcohol.
+`test_calculator.py` cubre: cálculo lineal, totales, porcentajes, diagnósticos, crioscopía, actividad de agua, nutrición, overrun y detección de alcohol.
+
+`tests/test_formulador_state.py` cubre: `callback_add_row` con state nulo/corrupto, `callback_clear_all`, `_collect_lines` con valores extremos, `_load_recipe_into_state` e invariantes del formulador.
 
 ---
 
