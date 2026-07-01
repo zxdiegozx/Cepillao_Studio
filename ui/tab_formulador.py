@@ -132,7 +132,21 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
             st.markdown("""
 <div class="ing-col-header">
   <span>Ingrediente</span><span>Gramos</span><span>$/kg</span>
-</div>""", unsafe_allow_html=True)
+</div>
+<script>
+(function(){
+  function tagIngRows(){
+    document.querySelectorAll('[data-testid="stHorizontalBlock"]').forEach(function(el){
+      if(el.querySelector('input[aria-label^="g_"]')){
+        el.classList.add('ing-row-block');
+      }
+    });
+  }
+  tagIngRows();
+  new MutationObserver(tagIngRows).observe(document.documentElement,
+    {childList:true,subtree:true});
+})();
+</script>""", unsafe_allow_html=True)
 
             lines_for_calculator    = []
             active_ingredient_names = []
@@ -144,9 +158,9 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
                     key=f"ing_name_{i}", label_visibility="collapsed"
                 )
                 grams = c2.number_input(
-                    f"g_{i}", 0.0, 5000.0, 0.0, step=5.0,
+                    f"g_{i}", 0.0, 5000.0, 0.0, step=0.5,
                     key=f"grams_{i}", label_visibility="collapsed",
-                    format="%.0f"
+                    format="%.1f"
                 )
                 price = c3.number_input(
                     f"p_{i}", 0.0, step=0.5,
