@@ -3,6 +3,18 @@
 /* Fondo general */
 .main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
 
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0 8px;
+    overflow: visible;
+}
+.app-header-logo  { font-size: 2rem; line-height: 1; display: block; }
+.app-header-title { font-size: 1.5rem; font-weight: 800; color: #fff; line-height: 1.2; }
+.app-header-sub   { font-size: 0.78rem; color: #666; }
+
 /* Evita que Streamlit clipee el header con emoji grande */
 [data-testid="stMarkdownContainer"] { overflow: visible; }
 
@@ -230,6 +242,12 @@ div[data-testid="stSidebar"] { background: #111120; }
     [data-testid="stDownloadButton"] > button {
         min-height: 48px !important;
     }
+
+    /* Header más compacto en móvil */
+    .app-header       { gap: 8px; padding: 4px 0 6px; }
+    .app-header-logo  { font-size: 1.4rem !important; }
+    .app-header-title { font-size: 1.05rem !important; }
+    .app-header-sub   { font-size: 0.7rem !important; }
 
     /* Ocultar cabecera "Ingrediente / Gramos / $/kg": confunde apilada */
     .ing-col-header { display: none !important; }

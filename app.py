@@ -59,11 +59,11 @@ else:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="display:flex;align-items:center;gap:12px;padding:6px 0 8px;overflow:visible;">
-  <span style="font-size:2rem;line-height:1;display:block;">🍦</span>
+<div class="app-header">
+  <span class="app-header-logo">🍦</span>
   <div>
-    <div style="font-size:1.5rem;font-weight:800;color:#fff;line-height:1.2;">Cepillao' Gelato Studio</div>
-    <div style="font-size:0.78rem;color:#666;">Motor científico · helados, gelato &amp; sorbetes</div>
+    <div class="app-header-title">Cepillao' Gelato Studio</div>
+    <div class="app-header-sub">Motor científico · helados, gelato &amp; sorbetes</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
