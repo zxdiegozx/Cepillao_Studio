@@ -186,9 +186,10 @@ div[data-testid="stSidebar"] { background: #111120; }
 /* ── Mobile (≤ 768px) ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
 
-    /* Más espacio aprovechable */
+    /* El toolbar de Streamlit es un overlay fijo de ~52px en móvil.
+       Con menos de 3.5rem el header queda bajo ese overlay y no se ve. */
     .main .block-container {
-        padding-top: 0.75rem !important;
+        padding-top: 3.5rem !important;
         padding-left: 0.75rem !important;
         padding-right: 0.75rem !important;
     }
@@ -243,8 +244,8 @@ div[data-testid="stSidebar"] { background: #111120; }
         min-height: 48px !important;
     }
 
-    /* Header más compacto en móvil */
-    .app-header       { gap: 8px; padding: 4px 0 6px; }
+    /* Header compacto: con padding-top 3.5rem el bloque cae bajo el toolbar */
+    .app-header { gap: 8px; padding: 0 0 6px; }
     .app-header-logo  { font-size: 1.4rem !important; }
     .app-header-title { font-size: 1.05rem !important; }
     .app-header-sub   { font-size: 0.7rem !important; }
