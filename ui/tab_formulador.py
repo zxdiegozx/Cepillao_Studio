@@ -19,7 +19,12 @@ from .components import (
 def render(tab, ingredients_map: dict, ingredient_names: list):
     with tab:
 
-        if "num_rows" not in st.session_state:
+        # Garantiza que num_rows sea siempre un int válido ≥ 4.
+        # Si Streamlit borra el estado en un rerun inesperado, el formulario
+        # se queda vacío pero no explota con TypeError/AttributeError.
+        try:
+            st.session_state.num_rows = max(4, int(st.session_state.get("num_rows", 4)))
+        except (TypeError, ValueError):
             st.session_state.num_rows = 4
 
         # ── Sidebar ───────────────────────────────────────────────────────────
@@ -177,12 +182,17 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
 
         # ── Columna análisis ──────────────────────────────────────────────────
         with col_panel:
-            _render_panel(
-                lines_for_calculator, active_ingredient_names,
-                product_type, machine, is_creami,
-                overrun_pct, target_liters, brix_medido,
-                recipe_name_input,
-            )
+            try:
+                _render_panel(
+                    lines_for_calculator, active_ingredient_names,
+                    product_type, machine, is_creami,
+                    overrun_pct, target_liters, brix_medido,
+                    recipe_name_input,
+                )
+            except Exception as _err:
+                st.error(f"⚠️ Error en el panel de análisis: {_err}")
+                st.caption("Los datos del formulario están intactos. "
+                           "Revisa la consola para el traceback completo.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

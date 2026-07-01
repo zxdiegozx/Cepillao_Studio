@@ -140,11 +140,23 @@ def _radar_chart(pct: dict, tg: dict):
 
 def _collect_lines():
     lines = []
-    for i in range(st.session_state.get("num_rows", 4)):
-        n = st.session_state.get(f"ing_name_{i}", "")
+    num_rows = st.session_state.get("num_rows", 4)
+    # Guard: num_rows puede llegar como float o None si el state se corrompe
+    try:
+        num_rows = int(num_rows)
+    except (TypeError, ValueError):
+        num_rows = 4
+    for i in range(num_rows):
+        n = st.session_state.get(f"ing_name_{i}", "") or ""
         g = st.session_state.get(f"grams_{i}", 0.0)
         p = st.session_state.get(f"price_{i}", 0.0)
-        if n and g:
+        # Guard: grams puede llegar como None o NaN cuando el widget falla
+        try:
+            g = float(g) if g is not None else 0.0
+            p = float(p) if p is not None else 0.0
+        except (TypeError, ValueError):
+            g, p = 0.0, 0.0
+        if n and g > 0:
             lines.append({"ingredient_name": n, "grams": g, "price_per_kg": p})
     return lines
 
@@ -168,7 +180,11 @@ def _invalidate_ingredient_cache():
 
 
 def callback_add_row():
-    st.session_state.num_rows += 1
+    try:
+        current = int(st.session_state.get("num_rows") or 4)
+    except (TypeError, ValueError):
+        current = 4
+    st.session_state.num_rows = current + 1
 
 
 def callback_clear_all():
