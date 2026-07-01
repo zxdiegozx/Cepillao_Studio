@@ -234,13 +234,11 @@ div[data-testid="stSidebar"] { background: #111120; }
     /* Ocultar cabecera "Ingrediente / Gramos / $/kg": confunde apilada */
     .ing-col-header { display: none !important; }
 
-    /* Separador visual entre filas de ingrediente */
-    .ing-row-wrap {
+    /* Separador entre filas de ingrediente (el div se renderiza en el flujo) */
+    .ing-row-sep {
         border-bottom: 1px solid #1e1e32;
-        padding-bottom: 6px;
-        margin-bottom: 6px;
+        margin: 2px 0 8px;
     }
-    .ing-row-wrap:last-of-type { border-bottom: none; }
 
     /* Gap mínimo entre columnas apiladas */
     [data-testid="stHorizontalBlock"] {

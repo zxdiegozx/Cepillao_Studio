@@ -153,6 +153,7 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
                     key=f"price_{i}", label_visibility="collapsed",
                     format="%.2f"
                 )
+                st.markdown('<div class="ing-row-sep"></div>', unsafe_allow_html=True)
                 if ing_name and grams > 0:
                     ing_obj = ingredients_map.get(ing_name)
                     if ing_obj:
