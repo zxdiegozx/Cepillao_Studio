@@ -245,19 +245,28 @@ div[data-testid="stSidebar"] { background: #111120; }
         gap: 4px !important;
     }
 
-    /* Filas de ingredientes: mantener horizontal en móvil usando :has()
-       Apunta a cualquier stHorizontalBlock que contenga un input de gramos */
-    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) {
+    /* Filas de ingredientes: mantener horizontal en móvil.
+       El selector anidado evita aplicar nowrap al contenedor [9,11] externo:
+       solo afecta stHorizontalBlocks que ya están dentro de otro stHorizontalBlock
+       y que además contienen los inputs de gramos. */
+    [data-testid="stHorizontalBlock"]
+        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) {
         flex-wrap: nowrap !important;
         gap: 4px !important;
     }
-    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) > div {
+    [data-testid="stHorizontalBlock"]
+        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) > div {
         min-width: 0 !important;
     }
     /* Selectbox de ingrediente más compacto */
-    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+    [data-testid="stHorizontalBlock"]
+        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
         [data-baseweb="select"] * { font-size: 0.8rem !important; }
-    /* Number inputs de gramos y precio más compactos */
-    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
-        [data-testid="stNumberInput"] input { font-size: 0.85rem !important; padding: 4px 6px !important; }
+    /* Number inputs compactos */
+    [data-testid="stHorizontalBlock"]
+        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+        [data-testid="stNumberInput"] input {
+        font-size: 0.85rem !important;
+        padding: 4px 6px !important;
+    }
 }
