@@ -132,21 +132,7 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
             st.markdown("""
 <div class="ing-col-header">
   <span>Ingrediente</span><span>Gramos</span><span>$/kg</span>
-</div>
-<script>
-(function(){
-  function tagIngRows(){
-    document.querySelectorAll('[data-testid="stHorizontalBlock"]').forEach(function(el){
-      if(el.querySelector('input[aria-label^="g_"]')){
-        el.classList.add('ing-row-block');
-      }
-    });
-  }
-  tagIngRows();
-  new MutationObserver(tagIngRows).observe(document.documentElement,
-    {childList:true,subtree:true});
-})();
-</script>""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
             lines_for_calculator    = []
             active_ingredient_names = []

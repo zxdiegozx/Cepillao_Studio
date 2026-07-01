@@ -245,17 +245,19 @@ div[data-testid="stSidebar"] { background: #111120; }
         gap: 4px !important;
     }
 
-    /* Filas de ingredientes: mantener horizontal en móvil (clase inyectada por JS) */
-    .ing-row-block {
+    /* Filas de ingredientes: mantener horizontal en móvil usando :has()
+       Apunta a cualquier stHorizontalBlock que contenga un input de gramos */
+    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) {
         flex-wrap: nowrap !important;
-        align-items: center !important;
+        gap: 4px !important;
     }
-    /* Proporciones: ingredient 50%, grams 28%, price 22% */
-    .ing-row-block > div:nth-child(1) { flex: 3 1 0% !important; min-width: 0 !important; }
-    .ing-row-block > div:nth-child(2) { flex: 1.8 1 0% !important; min-width: 0 !important; }
-    .ing-row-block > div:nth-child(3) { flex: 1.4 1 0% !important; min-width: 0 !important; }
-
-    /* Texto del selectbox más pequeño para que quepa en móvil */
-    .ing-row-block [data-baseweb="select"] *  { font-size: 0.8rem !important; }
-    .ing-row-block [data-testid="stNumberInput"] input { font-size: 0.85rem !important; }
+    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) > div {
+        min-width: 0 !important;
+    }
+    /* Selectbox de ingrediente más compacto */
+    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+        [data-baseweb="select"] * { font-size: 0.8rem !important; }
+    /* Number inputs de gramos y precio más compactos */
+    [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+        [data-testid="stNumberInput"] input { font-size: 0.85rem !important; padding: 4px 6px !important; }
 }
