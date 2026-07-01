@@ -129,18 +129,15 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
         # ── Columna ingredientes ──────────────────────────────────────────────
         with col_ing:
             st.markdown('<div class="section-overline">🧾 Ingredientes</div>', unsafe_allow_html=True)
-            st.markdown('<div class="ing-col-header">', unsafe_allow_html=True)
-            _h1, _h2, _h3 = st.columns([3, 1.5, 1.5])
-            _h1.caption("Ingrediente")
-            _h2.caption("Gramos")
-            _h3.caption("$/kg")
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("""
+<div class="ing-col-header">
+  <span>Ingrediente</span><span>Gramos</span><span>$/kg</span>
+</div>""", unsafe_allow_html=True)
 
             lines_for_calculator    = []
             active_ingredient_names = []
 
             for i in range(st.session_state.num_rows):
-                st.markdown(f'<div class="ing-row-wrap" id="ing-row-{i}">', unsafe_allow_html=True)
                 c1, c2, c3 = st.columns([3, 1.5, 1.5])
                 ing_name = c1.selectbox(
                     f"ing_{i}", [""] + ingredient_names,
@@ -156,7 +153,6 @@ def render(tab, ingredients_map: dict, ingredient_names: list):
                     key=f"price_{i}", label_visibility="collapsed",
                     format="%.2f"
                 )
-                st.markdown('</div>', unsafe_allow_html=True)
                 if ing_name and grams > 0:
                     ing_obj = ingredients_map.get(ing_name)
                     if ing_obj:

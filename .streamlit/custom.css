@@ -87,8 +87,8 @@
 .diag-title { font-size: 0.85rem; font-weight: 600; color: #eee; }
 .diag-tip   { font-size: 0.78rem; color: #999; margin-top: 3px; }
 
-/* Fila de ingrediente */
-.ing-row-header {
+/* Cabecera de columnas de ingredientes */
+.ing-col-header {
     display: grid;
     grid-template-columns: 3fr 1.5fr 1.5fr;
     gap: 6px;
