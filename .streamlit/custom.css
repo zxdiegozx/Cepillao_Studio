@@ -246,25 +246,20 @@ div[data-testid="stSidebar"] { background: #111120; }
     }
 
     /* Filas de ingredientes: mantener horizontal en móvil.
-       El selector anidado evita aplicar nowrap al contenedor [9,11] externo:
-       solo afecta stHorizontalBlocks que ya están dentro de otro stHorizontalBlock
-       y que además contienen los inputs de gramos. */
-    [data-testid="stHorizontalBlock"]
-        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) {
+       Doble condición: exactamente 3 hijos directos (≠ bloque [9,11] que tiene 2)
+       Y contiene un input de gramos (≠ columnas del panel de análisis). */
+    [data-testid="stHorizontalBlock"]:has(> *:nth-child(3)):has(input[aria-label^="g_"]) {
         flex-wrap: nowrap !important;
         gap: 4px !important;
     }
-    [data-testid="stHorizontalBlock"]
-        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"]) > div {
+    [data-testid="stHorizontalBlock"]:has(> *:nth-child(3)):has(input[aria-label^="g_"]) > div {
         min-width: 0 !important;
     }
-    /* Selectbox de ingrediente más compacto */
-    [data-testid="stHorizontalBlock"]
-        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+    /* Selectbox compacto */
+    [data-testid="stHorizontalBlock"]:has(> *:nth-child(3)):has(input[aria-label^="g_"])
         [data-baseweb="select"] * { font-size: 0.8rem !important; }
     /* Number inputs compactos */
-    [data-testid="stHorizontalBlock"]
-        [data-testid="stHorizontalBlock"]:has(input[aria-label^="g_"])
+    [data-testid="stHorizontalBlock"]:has(> *:nth-child(3)):has(input[aria-label^="g_"])
         [data-testid="stNumberInput"] input {
         font-size: 0.85rem !important;
         padding: 4px 6px !important;
